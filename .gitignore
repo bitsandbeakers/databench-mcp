@@ -1,0 +1,12 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# analysis workspaces — never commit data
+workspace/
+*.duckdb
+*.duckdb.wal
