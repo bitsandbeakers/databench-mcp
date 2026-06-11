@@ -130,6 +130,7 @@ def load_url(
 
     raw_dir = project_path(project) / "raw"
     dest = raw_dir / f"{table_name}{ext}"
+    raw_dir.mkdir(parents=True, exist_ok=True)
 
     with httpx.Client(follow_redirects=True, timeout=60.0) as client:
         response = client.get(url, params=params)
