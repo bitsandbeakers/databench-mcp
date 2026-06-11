@@ -69,3 +69,36 @@ def test_analyze_distribution_requires_profiled(tmp_path, monkeypatch):
     ws.ensure_project("test-proj")
     with pytest.raises(ValueError, match="profiled"):
         analyze_distribution("test-proj", "providers", "total_drug_cost")
+
+
+from databench_mcp.core.analysis import analyze_correlations
+
+
+def test_analyze_correlations_pearson(project_with_data):
+    result = analyze_correlations("test-proj", "providers",
+                                  columns=["total_drug_cost", "claim_count"])
+    assert result["method"] == "pearson"
+    assert "matrix" in result
+    assert "top_pairs" in result
+    assert len(result["top_pairs"]) >= 1
+    pair = result["top_pairs"][0]
+    assert "col_a" in pair and "col_b" in pair and "r" in pair
+
+
+def test_analyze_correlations_spearman(project_with_data):
+    result = analyze_correlations("test-proj", "providers",
+                                  columns=["total_drug_cost", "claim_count"],
+                                  method="spearman")
+    assert result["method"] == "spearman"
+
+
+def test_analyze_correlations_defaults_to_all_numeric(project_with_data):
+    result = analyze_correlations("test-proj", "providers")
+    assert len(result["matrix"]) >= 2
+
+
+def test_analyze_correlations_requires_profiled(tmp_path, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("test-proj")
+    with pytest.raises(ValueError, match="profiled"):
+        analyze_correlations("test-proj", "providers")

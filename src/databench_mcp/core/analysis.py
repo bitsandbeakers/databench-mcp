@@ -130,3 +130,55 @@ def analyze_distribution(
         },
         "verdict": verdict,
     }
+
+
+def analyze_correlations(
+    project: str,
+    table: str,
+    columns: list[str] | None = None,
+    method: str = "pearson",
+    top_n: int = 10,
+) -> dict[str, Any]:
+    """Return correlation matrix and top N pairs by absolute correlation."""
+    assert_profiled(project, table)
+    if method not in ("pearson", "spearman"):
+        raise ValueError(f"Unknown correlation method '{method}'. Choose: pearson, spearman")
+
+    with get_connection(project) as conn:
+        df = conn.execute(f'SELECT * FROM "{table}"').df()
+
+    numeric_df = df.select_dtypes(include="number")
+    if columns is not None:
+        for c in columns:
+            if c not in numeric_df.columns:
+                raise ValueError(f"Column '{c}' is not numeric or not in table")
+        numeric_df = numeric_df[columns]
+
+    if len(numeric_df.columns) < 2:
+        raise ValueError("Need at least 2 numeric columns for correlation analysis")
+
+    corr_matrix = numeric_df.corr(method=method)
+    matrix_dict = {
+        col: {c: round(float(v), 4) for c, v in row.items()}
+        for col, row in corr_matrix.to_dict().items()
+    }
+
+    pairs = []
+    cols = list(corr_matrix.columns)
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            r = corr_matrix.iloc[i, j]
+            if not np.isnan(r):
+                pairs.append({
+                    "col_a": cols[i],
+                    "col_b": cols[j],
+                    "r": round(float(r), 4),
+                    "abs_r": round(abs(float(r)), 4),
+                })
+    pairs.sort(key=lambda x: x["abs_r"], reverse=True)
+
+    return {
+        "method": method,
+        "matrix": matrix_dict,
+        "top_pairs": pairs[:top_n],
+    }
