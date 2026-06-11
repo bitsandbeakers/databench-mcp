@@ -5,8 +5,7 @@ import pytest
 
 import databench_mcp.workspace as ws
 from databench_mcp.core import ingest as core_ingest
-from databench_mcp.core import profile as core_profile
-from databench_mcp.core.eda import eda_summary, sql_query
+from databench_mcp.core.eda import sql_query
 
 
 @pytest.fixture(autouse=True)

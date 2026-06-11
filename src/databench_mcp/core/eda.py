@@ -7,7 +7,6 @@ import re
 from typing import Any
 
 from databench_mcp.db import get_connection
-from databench_mcp.workspace import read_manifest
 
 _SELECT_PATTERN = re.compile(r"^\s*(SELECT|WITH)\b", re.IGNORECASE)
 _DEFAULT_LIMIT = 500
@@ -27,7 +26,7 @@ def _to_json_safe(val: Any) -> Any:
 
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
-    stripped = sql.strip()
+    stripped = sql.strip().rstrip(";")
     if not _SELECT_PATTERN.match(stripped):
         raise ValueError("Only SELECT or WITH queries are permitted")
     if ";" in stripped:
