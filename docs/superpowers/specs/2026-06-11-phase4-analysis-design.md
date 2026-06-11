@@ -85,6 +85,8 @@ _REGISTRY: dict[str, Callable] = {
 
 Each handler receives `(df: pd.DataFrame, target: str | None, features: list[str], params: dict)` and returns a standardized findings dict (see §5).
 
+**SHAP specifics:** `_run_shap` fits its own tree model internally (gradient_boosting by default; override with `params={"base_model": "random_forest"}`). SHAP values are large arrays — they are **not** stored in `findings.yaml`. Instead, they are saved as a companion NumPy file at `workspace/<project>/findings/<finding_id>_shap.npy`. `create_chart(chart_type="shap_beeswarm", finding_id="f001")` loads from that path.
+
 ---
 
 ## 4. Tool Contracts
@@ -182,7 +184,7 @@ Chart saved to `workspace/<project>/charts/<chart_type>_<timestamp>.html`.
 - `feature_importance_bar` (accepts RF, GB, SHAP, permutation results via `finding_id`)
 - `scatter`, `scatter_matrix`
 - `cluster_scatter` (post-kmeans, color by cluster label)
-- `shap_beeswarm`, `shap_waterfall`
+- `shap_beeswarm`, `shap_waterfall` (requires prior `run_model(method="shap")`; loads companion `.npy` file)
 - `partial_dependence`
 
 ---
@@ -242,7 +244,7 @@ No update/delete in Phase 4 — findings are immutable once written (re-run the 
 | Non-numeric column passed to numeric-only method | `ValueError: column '{c}' is not numeric` |
 | Target not in table | `ValueError: target '{t}' not found in table` |
 | Insufficient rows for method (< 10) | `ValueError: need at least 10 rows, got {n}` |
-| SHAP called without prior `run_model` finding | `ValueError: shap requires a fitted model; run random_forest or gradient_boosting first and pass finding_id` |
+| SHAP chart requested but no companion `.npy` found | `ValueError: no SHAP values found for finding '{id}'; run run_model(method="shap") first` |
 
 All errors surface as clean `ValueError` strings — the tool wrapper catches and returns `{"error": str(e)}` rather than letting exceptions propagate to FastMCP.
 
