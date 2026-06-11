@@ -8,19 +8,22 @@
 
 ## Overview
 
-Adds network analysis capability to the existing method registry and chart system. Three new `run_model` methods let users construct graphs from edge-list tables and compute graph statistics, per-node centrality, and community structure. One new chart type (`network_graph`) renders force-directed Plotly HTML with a community dropdown that can be filtered to only show communities containing flagged nodes.
+Adds network analysis capability plus a general-purpose table derivation tool. One new MCP tool (`derive_table`) materializes any SQL SELECT as a new DuckDB table, enabling edge-list construction and other data transforms before analysis. Three new `run_model` methods then let users compute graph statistics, per-node centrality, and community structure on edge-list tables. One new chart type (`network_graph`) renders a force-directed Plotly HTML graph with a community dropdown that can be filtered to only show communities containing flagged nodes.
 
-No new MCP tools — this is a pure extension of the existing registry and chart-type dispatch tables. `EXPECTED_TOOL_COUNT` stays at 18.
+`EXPECTED_TOOL_COUNT` bumps from 18 → **19**.
 
 ---
 
 ## 1. Architecture
 
-### Layer separation (unchanged)
+### Layer separation (unchanged pattern)
 
 ```
+core/eda.py       →  derive_table (added alongside existing sql_query / eda_summary)
+tools/eda.py      →  derive_table wrapper (added to existing module)
 core/modeling.py  →  _run_network_stats, _run_network_centrality, _run_network_communities
 core/viz.py       →  "network_graph" added to _CHART_TYPES dispatch
+server.py         →  mcp.tool(derive_table); EXPECTED_TOOL_COUNT = 19
 ```
 
 ### New dependency
@@ -30,7 +33,7 @@ core/viz.py       →  "network_graph" added to _CHART_TYPES dispatch
 networkx = ">=3.2"
 ```
 
-No extra community-detection package needed — `networkx.community.louvain_communities` is available since networkx 3.0.
+No extra community-detection package needed — `networkx.community.louvain_communities` is available since networkx 3.0. No other new dependencies; `networkx` is the only addition.
 
 ### New artifacts
 
@@ -47,7 +50,55 @@ All three methods call `assert_profiled(project, table)`. They also validate tha
 
 ---
 
-## 2. Method Registry Additions
+## 2. `derive_table` Tool
+
+### Purpose
+
+`sql_query` is read-only. `derive_table` materializes a SQL SELECT as a new DuckDB table so the result can be profiled and used by downstream analysis tools. The canonical pre-network workflow is:
+
+```
+sql_query(...)             →  explore and develop the aggregation SQL
+derive_table(...)          →  materialize the edge list as a new table
+profile_table(...)         →  stamp profiled=True
+run_model("network_*")     →  analyze the edge-list table
+```
+
+### Contract
+
+```
+derive_table(project, sql, table_name)
+→ { "table": str, "rows": int, "columns": int }
+```
+
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `project` | str | yes | Must exist |
+| `sql` | str | yes | Must be a SELECT or WITH … SELECT. Writes rejected. |
+| `table_name` | str | yes | Name for the new table. Overwrites if it already exists. |
+
+**Implementation** lives in `core/eda.py` alongside `sql_query`. Uses the same write-blocking guard (rejects anything that isn't SELECT/WITH). Executes `CREATE OR REPLACE TABLE "{table_name}" AS ({sql})`, then records the table in the manifest with `profiled=False`:
+
+```python
+manifest["datasets"][table_name] = {
+    "source": "derived",
+    "sql": sql,
+    "profiled": False,
+    "rows": row_count,
+    "columns": col_count,
+}
+```
+
+**Error handling:**
+
+| Condition | Error |
+|-----------|-------|
+| SQL contains writes (INSERT/UPDATE/DELETE/DROP/CREATE) | `ValueError: only SELECT queries are allowed` |
+| DuckDB execution error | re-raised as `ValueError: {duckdb error message}` |
+| Invalid project | `FileNotFoundError` (from `read_manifest`) |
+
+---
+
+## 4. Method Registry Additions
 
 `_REGISTRY` in `core/modeling.py` gains three entries:
 
@@ -89,7 +140,7 @@ Graph is always undirected (`Graph`, not `DiGraph`) in Phase 4.5. Directed suppo
 
 ---
 
-## 3. Method Contracts
+## 5. Method Contracts
 
 ### `network_stats`
 
@@ -169,7 +220,7 @@ Saves `{finding_id}_communities.json`: `{"node_id": community_int, …}`.
 
 ---
 
-## 4. `network_graph` Chart
+## 6. `network_graph` Chart
 
 ### Signature
 
@@ -220,7 +271,7 @@ All edges share one low-opacity line trace (`opacity=0.3`, `line_width=0.5`). Ed
 
 ---
 
-## 5. Error Handling
+## 7. Error Handling
 
 | Condition | Error |
 |-----------|-------|
@@ -232,15 +283,18 @@ All edges share one low-opacity line trace (`opacity=0.3`, `line_width=0.5`). Ed
 
 ---
 
-## 6. Testing Strategy
+## 8. Testing Strategy
 
 ```
 tests/
+  test_core_eda.py                # extend existing: derive_table happy path + write-rejection
   test_core_modeling_network.py   # unit: all three handlers with synthetic edge DataFrame
   test_core_viz_network.py        # unit: network_graph chart output is valid HTML
   tools/
-    test_network_integration.py   # integration: run_model → create_chart end-to-end
+    test_network_integration.py   # integration: derive_table → profile → run_model → create_chart
 ```
+
+**`derive_table` tests:** happy path (SELECT creates table, manifest updated with `profiled=False`), write-blocked (INSERT raises ValueError), overwrite idempotent (calling twice with same `table_name` succeeds).
 
 **Synthetic fixture:** 50-node, 100-edge random graph built with `networkx.gnm_random_graph(50, 100, seed=42)`, exported to a DataFrame with columns `source`, `target`, `weight`.
 
@@ -252,7 +306,7 @@ Each method: one happy-path test, one "fewer than 2 nodes" error test.
 
 ---
 
-## 7. Extensibility
+## 9. Extensibility
 
 To add directed graph support later:
 1. Add `directed=False` param to all three network methods.
