@@ -84,3 +84,57 @@ def test_regression_method_raises_for_too_few_rows(reg_df):
     tiny = reg_df.head(5)
     with pytest.raises(ValueError, match="at least 10 rows"):
         _run_linear_regression(tiny, "cost", ["feature_a"], {})
+
+
+from databench_mcp.core.modeling import (
+    _run_decision_tree,
+    _run_random_forest,
+    _run_gradient_boosting,
+    _run_shap,
+    _run_permutation_importance,
+    _run_mutual_information,
+)
+
+
+def test_decision_tree_regression(reg_df):
+    result = _run_decision_tree(reg_df, "cost", ["feature_a", "feature_b"], {})
+    assert "r2" in result["metrics"]
+    assert "feature_importance" in result["metrics"]
+    assert result["explainability"] == "high"
+
+
+def test_decision_tree_classification(clf_df):
+    result = _run_decision_tree(clf_df, "label", ["feature_a", "feature_b"], {})
+    assert "accuracy" in result["metrics"]
+
+
+def test_random_forest_regression(reg_df):
+    result = _run_random_forest(reg_df, "cost", ["feature_a", "feature_b"], {})
+    assert "r2" in result["metrics"]
+    assert "feature_importance" in result["metrics"]
+    assert result["explainability"] == "medium"
+
+
+def test_gradient_boosting_regression(reg_df):
+    result = _run_gradient_boosting(reg_df, "cost", ["feature_a", "feature_b"], {})
+    assert "r2" in result["metrics"]
+    assert "feature_importance" in result["metrics"]
+
+
+def test_shap_returns_values(reg_df):
+    result = _run_shap(reg_df, "cost", ["feature_a", "feature_b"], {})
+    assert "mean_abs_shap" in result["metrics"]
+    assert "shap_values" in result
+    assert result["shap_values"].shape[1] == 2
+
+
+def test_permutation_importance_returns_scores(reg_df):
+    result = _run_permutation_importance(reg_df, "cost", ["feature_a", "feature_b"], {})
+    assert "importance_mean" in result["metrics"]
+    assert result["explainability"] == "medium"
+
+
+def test_mutual_information_returns_scores(reg_df):
+    result = _run_mutual_information(reg_df, "cost", ["feature_a", "feature_b"], {})
+    assert "mi_scores" in result["metrics"]
+    assert result["explainability"] == "high"

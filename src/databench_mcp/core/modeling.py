@@ -223,7 +223,180 @@ def _run_quantile_regression(
 
 
 # ---------------------------------------------------------------------------
-# Registry (partial — to be completed in Task 8)
+# Tree-based methods
+# ---------------------------------------------------------------------------
+
+def _run_decision_tree(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    _min_rows_check(df)
+    task = _detect_task(df, target, params)
+    X, y, feat_names = _prepare_xy(df, features, target)
+    X_tr, X_te, y_tr, y_te = _split(X, y)
+    max_depth = params.get("max_depth", None)
+    if task == "regression":
+        model = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
+        model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_te)
+        base_metrics = _reg_metrics(y_te, y_pred)
+        summary_fn = _summary_reg
+    else:
+        model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
+        model.fit(X_tr, y_tr.astype(int))
+        y_pred = model.predict(X_te)
+        base_metrics = _clf_metrics(y_te.astype(int), y_pred)
+        summary_fn = _summary_clf
+    importance = {n: round(float(v), 6) for n, v in zip(feat_names, model.feature_importances_)}
+    metrics = {**base_metrics, "feature_importance": importance, "max_depth": model.get_depth()}
+    return {
+        "metrics": metrics,
+        "explainability": "high",
+        "summary": summary_fn("Decision tree", target, metrics),
+    }
+
+
+def _run_random_forest(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    _min_rows_check(df)
+    task = _detect_task(df, target, params)
+    X, y, feat_names = _prepare_xy(df, features, target)
+    X_tr, X_te, y_tr, y_te = _split(X, y)
+    n_estimators = int(params.get("n_estimators", 100))
+    if task == "regression":
+        model = RandomForestRegressor(n_estimators=n_estimators, random_state=42, n_jobs=-1)
+        model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_te)
+        base_metrics = _reg_metrics(y_te, y_pred)
+        summary_fn = _summary_reg
+    else:
+        model = RandomForestClassifier(n_estimators=n_estimators, random_state=42, n_jobs=-1)
+        model.fit(X_tr, y_tr.astype(int))
+        y_pred = model.predict(X_te)
+        base_metrics = _clf_metrics(y_te.astype(int), y_pred)
+        summary_fn = _summary_clf
+    importance = {n: round(float(v), 6) for n, v in zip(feat_names, model.feature_importances_)}
+    metrics = {**base_metrics, "feature_importance": importance, "n_estimators": n_estimators}
+    return {
+        "metrics": metrics,
+        "explainability": "medium",
+        "summary": summary_fn("Random forest", target, metrics),
+    }
+
+
+def _run_gradient_boosting(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    _min_rows_check(df)
+    task = _detect_task(df, target, params)
+    X, y, feat_names = _prepare_xy(df, features, target)
+    X_tr, X_te, y_tr, y_te = _split(X, y)
+    n_estimators = int(params.get("n_estimators", 100))
+    if task == "regression":
+        model = GradientBoostingRegressor(n_estimators=n_estimators, random_state=42)
+        model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_te)
+        base_metrics = _reg_metrics(y_te, y_pred)
+        summary_fn = _summary_reg
+    else:
+        model = GradientBoostingClassifier(n_estimators=n_estimators, random_state=42)
+        model.fit(X_tr, y_tr.astype(int))
+        y_pred = model.predict(X_te)
+        base_metrics = _clf_metrics(y_te.astype(int), y_pred)
+        summary_fn = _summary_clf
+    importance = {n: round(float(v), 6) for n, v in zip(feat_names, model.feature_importances_)}
+    metrics = {**base_metrics, "feature_importance": importance, "n_estimators": n_estimators}
+    return {
+        "metrics": metrics,
+        "explainability": "medium",
+        "summary": summary_fn("Gradient boosting", target, metrics),
+    }
+
+
+# ---------------------------------------------------------------------------
+# SHAP, permutation importance, mutual information
+# ---------------------------------------------------------------------------
+
+def _run_shap(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    """Fit internal GBM, compute SHAP values. Caller saves shap_values to .npy."""
+    import shap as _shap
+
+    _min_rows_check(df)
+    X, y, feat_names = _prepare_xy(df, features, target)
+    base_model_name = params.get("base_model", "gradient_boosting")
+    if base_model_name == "random_forest":
+        model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=-1)
+    else:
+        model = GradientBoostingRegressor(n_estimators=50, random_state=42)
+    model.fit(X, y)
+    explainer = _shap.TreeExplainer(model)
+    shap_vals = explainer.shap_values(X)
+    mean_abs = {n: round(float(v), 6) for n, v in zip(feat_names, np.abs(shap_vals).mean(axis=0))}
+    metrics = {
+        "mean_abs_shap": mean_abs,
+        "base_model": base_model_name,
+        "n_samples": len(X),
+    }
+    return {
+        "metrics": metrics,
+        "explainability": "medium",
+        "summary": f"SHAP via {base_model_name} — top driver: {max(mean_abs, key=mean_abs.get)}.",
+        "shap_values": shap_vals,
+    }
+
+
+def _run_permutation_importance(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    from sklearn.inspection import permutation_importance as _perm_imp
+
+    _min_rows_check(df)
+    task = _detect_task(df, target, params)
+    X, y, feat_names = _prepare_xy(df, features, target)
+    X_tr, X_te, y_tr, y_te = _split(X, y)
+    if task == "regression":
+        model = RandomForestRegressor(n_estimators=50, random_state=42)
+        model.fit(X_tr, y_tr)
+    else:
+        model = RandomForestClassifier(n_estimators=50, random_state=42)
+        model.fit(X_tr, y_tr.astype(int))
+        y_te = y_te.astype(int)
+    result_pi = _perm_imp(model, X_te, y_te, n_repeats=10, random_state=42)
+    imp_mean = {n: round(float(v), 6) for n, v in zip(feat_names, result_pi.importances_mean)}
+    metrics = {"importance_mean": imp_mean}
+    top = max(imp_mean, key=imp_mean.get)
+    return {
+        "metrics": metrics,
+        "explainability": "medium",
+        "summary": f"Permutation importance on '{target}' — top feature: {top}.",
+    }
+
+
+def _run_mutual_information(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    from sklearn.feature_selection import mutual_info_classif, mutual_info_regression
+
+    _min_rows_check(df)
+    task = _detect_task(df, target, params)
+    X, y, feat_names = _prepare_xy(df, features, target)
+    if task == "classification":
+        scores = mutual_info_classif(X, y.astype(int), random_state=42)
+    else:
+        scores = mutual_info_regression(X, y, random_state=42)
+    mi = {n: round(float(v), 6) for n, v in zip(feat_names, scores)}
+    top = max(mi, key=mi.get)
+    return {
+        "metrics": {"mi_scores": mi},
+        "explainability": "high",
+        "summary": f"Mutual information on '{target}' — top feature: {top}.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Registry
 # ---------------------------------------------------------------------------
 
 _REGISTRY: dict[str, Callable] = {
@@ -233,4 +406,10 @@ _REGISTRY: dict[str, Callable] = {
     "elastic_net": _run_elastic_net,
     "logistic_regression": _run_logistic_regression,
     "quantile_regression": _run_quantile_regression,
+    "decision_tree": _run_decision_tree,
+    "random_forest": _run_random_forest,
+    "gradient_boosting": _run_gradient_boosting,
+    "shap": _run_shap,
+    "permutation_importance": _run_permutation_importance,
+    "mutual_information": _run_mutual_information,
 }
