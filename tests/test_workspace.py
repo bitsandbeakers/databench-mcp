@@ -64,3 +64,26 @@ def test_invalid_project_name_raises():
 
     with pytest.raises(ValueError, match="Invalid project name"):
         ws.ensure_project("")
+
+
+def test_assert_profiled_raises_when_not_profiled(tmp_path):
+    ws.ensure_project("test-proj")
+    manifest = ws.read_manifest("test-proj")
+    manifest["datasets"]["tbl"] = {"profiled": False, "source": "x.csv"}
+    ws.write_manifest("test-proj", manifest)
+    with pytest.raises(ValueError, match="not been profiled"):
+        ws.assert_profiled("test-proj", "tbl")
+
+
+def test_assert_profiled_passes_when_profiled(tmp_path):
+    ws.ensure_project("test-proj")
+    manifest = ws.read_manifest("test-proj")
+    manifest["datasets"]["tbl"] = {"profiled": True, "source": "x.csv"}
+    ws.write_manifest("test-proj", manifest)
+    ws.assert_profiled("test-proj", "tbl")  # must not raise
+
+
+def test_assert_profiled_raises_for_unknown_table(tmp_path):
+    ws.ensure_project("test-proj")
+    with pytest.raises(ValueError, match="not in manifest"):
+        ws.assert_profiled("test-proj", "ghost_table")

@@ -56,3 +56,16 @@ def write_manifest(name: str, manifest: dict) -> None:
     tmp = target.with_suffix(".tmp")
     tmp.write_text(json.dumps(manifest, indent=2))
     os.replace(tmp, target)
+
+
+def assert_profiled(name: str, table: str) -> None:
+    """Raise ValueError if table is not registered and profiled in the manifest."""
+    manifest = read_manifest(name)
+    ds = manifest["datasets"].get(table)
+    if ds is None:
+        raise ValueError(f"Table '{table}' not in manifest for project '{name}'")
+    if not ds.get("profiled"):
+        raise ValueError(
+            f"Table '{table}' has not been profiled — "
+            f"run profile_table('{name}', '{table}') first"
+        )
