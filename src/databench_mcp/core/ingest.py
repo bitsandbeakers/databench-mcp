@@ -4,9 +4,12 @@ in the manifest. Tools in tools/ingest.py are thin wrappers over these functions
 from __future__ import annotations
 
 import re
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from databench_mcp.db import get_connection
 from databench_mcp.workspace import read_manifest, write_manifest
@@ -103,3 +106,35 @@ def load_file(
         "columns": len(schema),
         "schema": schema,
     }
+
+
+def load_url(
+    project: str,
+    url: str,
+    table_name: str,
+    params: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Download a URL to raw/ and load into the project DuckDB.
+
+    Supports CMS data.gov Socrata API (pass ``params`` for ``$limit``, ``$where``
+    filters). Extension is inferred from the URL path; defaults to ``.csv``.
+    """
+    table_name = _safe_identifier(table_name)
+
+    parsed = urllib.parse.urlparse(url)
+    ext = Path(parsed.path).suffix.lower() or ".csv"
+    if ext not in _SUPPORTED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported URL file format {ext!r}. Supported: {sorted(_SUPPORTED_EXTENSIONS)}"
+        )
+
+    from databench_mcp.workspace import project_path
+    raw_dir = project_path(project) / "raw"
+    dest = raw_dir / f"{table_name}{ext}"
+
+    with httpx.Client(follow_redirects=True, timeout=60.0) as client:
+        response = client.get(url, params=params)
+        response.raise_for_status()
+        dest.write_bytes(response.content)
+
+    return load_file(project, dest, table_name)
