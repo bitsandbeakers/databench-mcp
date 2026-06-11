@@ -1,9 +1,8 @@
 """FastMCP server entry point.
 
-Tools are thin orchestration wrappers; all logic lives in ``databench_mcp.core``.
+Tools are thin orchestration wrappers; all logic lives in databench_mcp.core.
 The tool count is asserted at startup so a refactor can never silently drop a tool.
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -12,11 +11,12 @@ from typing import Any
 from fastmcp import FastMCP
 
 from databench_mcp import __version__
+from databench_mcp.tools.project import project_create, project_list, project_status
 
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 1
+EXPECTED_TOOL_COUNT = 4
 
 
 async def ping() -> dict[str, Any]:
@@ -25,6 +25,9 @@ async def ping() -> dict[str, Any]:
 
 
 mcp.tool(ping)
+mcp.tool(project_create)
+mcp.tool(project_list)
+mcp.tool(project_status)
 
 
 def _assert_tool_count() -> None:
