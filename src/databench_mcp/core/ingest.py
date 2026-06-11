@@ -63,7 +63,7 @@ def load_file(
         if not re.match(r"^[a-zA-Z_]", table_name):
             table_name = f"t_{table_name}"
 
-    _safe_identifier(table_name)
+    table_name = _safe_identifier(table_name)
 
     with get_connection(project) as conn:
         if ext in (".csv", ".tsv"):
@@ -81,10 +81,12 @@ def load_file(
         elif ext in (".xlsx", ".xls"):
             import polars as pl
             df = pl.read_excel(file_path, engine="openpyxl")
-            conn.register("_excel_tmp", df.to_arrow())
+            arrow_table = df.to_arrow()
+            conn.register("_excel_tmp", arrow_table)
             conn.execute(
                 f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _excel_tmp"
             )
+            conn.unregister("_excel_tmp")
 
         row_count: int = conn.execute(
             f"SELECT COUNT(*) FROM {table_name}"
