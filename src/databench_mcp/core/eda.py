@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from databench_mcp.db import get_connection
+from databench_mcp.workspace import read_manifest
 
 _SELECT_PATTERN = re.compile(r"^\s*(SELECT|WITH)\b", re.IGNORECASE)
 _DEFAULT_LIMIT = 500
@@ -57,4 +58,25 @@ def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, 
 
 def eda_summary(project: str) -> dict[str, Any]:
     """Return a dataset summary derived from the project manifest. No DB query."""
-    raise NotImplementedError
+    manifest = read_manifest(project)
+    datasets = manifest.get("datasets", {})
+
+    result_datasets = []
+    for name, ds in datasets.items():
+        entry: dict[str, Any] = {
+            "name": name,
+            "rows": ds.get("row_count"),
+            "cols": ds.get("col_count"),
+            "profiled": ds.get("profiled", False),
+            "ingested_at": ds.get("ingested_at"),
+            "source": ds.get("source"),
+        }
+        if ds.get("profiled") and ds.get("profile"):
+            entry["columns"] = list(ds["profile"].keys())
+        result_datasets.append(entry)
+
+    return {
+        "project": project,
+        "dataset_count": len(result_datasets),
+        "datasets": result_datasets,
+    }

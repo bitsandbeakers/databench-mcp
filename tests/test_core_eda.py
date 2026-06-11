@@ -5,7 +5,8 @@ import pytest
 
 import databench_mcp.workspace as ws
 from databench_mcp.core import ingest as core_ingest
-from databench_mcp.core.eda import sql_query
+from databench_mcp.core import profile as core_profile
+from databench_mcp.core.eda import eda_summary, sql_query
 
 
 @pytest.fixture(autouse=True)
@@ -58,3 +59,32 @@ def test_sql_query_rejects_non_select(loaded_table):
 def test_sql_query_rejects_semicolon(loaded_table):
     with pytest.raises(ValueError, match="Multi-statement"):
         sql_query("test-proj", "SELECT 1; DROP TABLE providers")
+
+
+# --- eda_summary ---
+
+
+def test_eda_summary_empty_project():
+    result = eda_summary("test-proj")
+    assert result["project"] == "test-proj"
+    assert result["dataset_count"] == 0
+    assert result["datasets"] == []
+
+
+def test_eda_summary_with_dataset(loaded_table):
+    result = eda_summary("test-proj")
+    assert result["dataset_count"] == 1
+    ds = result["datasets"][0]
+    assert ds["name"] == loaded_table
+    assert ds["profiled"] is False
+    assert ds["rows"] == 3
+    assert "columns" not in ds
+
+
+def test_eda_summary_profiled_includes_column_names(loaded_table):
+    core_profile.profile_table("test-proj", loaded_table)
+    result = eda_summary("test-proj")
+    ds = result["datasets"][0]
+    assert ds["profiled"] is True
+    assert "columns" in ds
+    assert "npi" in ds["columns"]
