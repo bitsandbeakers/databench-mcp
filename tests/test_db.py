@@ -30,3 +30,8 @@ def test_get_connection_persists_across_connections(tmp_path):
     with get_connection("test-proj") as conn:
         result = conn.execute("SELECT x FROM t").fetchone()
     assert result[0] == 7
+
+
+def test_get_connection_raises_for_unknown_project(tmp_path):
+    with pytest.raises(FileNotFoundError, match="not found"):
+        get_connection("no-such-project")
