@@ -10,3 +10,6 @@ dist/
 workspace/
 *.duckdb
 *.duckdb.wal
+
+# claude worktrees (per-machine)
+.claude/worktrees/
