@@ -38,3 +38,34 @@ def test_detect_outliers_requires_profiled(tmp_path, monkeypatch):
     ws.ensure_project("test-proj")
     with pytest.raises(ValueError, match="profiled"):
         detect_outliers("test-proj", "providers", "total_drug_cost")
+
+
+from databench_mcp.core.analysis import analyze_distribution
+
+
+def test_analyze_distribution_returns_shape_stats(project_with_data):
+    result = analyze_distribution("test-proj", "providers", "total_drug_cost")
+    assert result["column"] == "total_drug_cost"
+    assert "mean" in result
+    assert "median" in result
+    assert "skewness" in result
+    assert "kurtosis" in result
+    assert "percentiles" in result
+    assert "verdict" in result
+    assert result["verdict"] in (
+        "approximately normal", "right-skewed", "left-skewed", "heavy-tailed"
+    )
+
+
+def test_analyze_distribution_includes_normality_test(project_with_data):
+    result = analyze_distribution("test-proj", "providers", "total_drug_cost")
+    assert "normality_stat" in result
+    assert "normality_p" in result
+    assert "normality_test" in result
+
+
+def test_analyze_distribution_requires_profiled(tmp_path, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("test-proj")
+    with pytest.raises(ValueError, match="profiled"):
+        analyze_distribution("test-proj", "providers", "total_drug_cost")

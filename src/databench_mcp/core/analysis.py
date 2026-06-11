@@ -74,3 +74,59 @@ def detect_outliers(
         "threshold": threshold,
         "sample_outliers": [round(float(v), 4) for v in sample],
     }
+
+
+def analyze_distribution(
+    project: str,
+    table: str,
+    column: str,
+) -> dict[str, Any]:
+    """Return distribution shape stats for a numeric column."""
+    assert_profiled(project, table)
+    series = _load_column(project, table, column)
+    if not pd.api.types.is_numeric_dtype(series):
+        raise ValueError(f"Column '{column}' is not numeric")
+
+    values = series.values.astype(float)
+    n = len(values)
+
+    skewness = float(stats.skew(values))
+    kurt = float(stats.kurtosis(values))
+
+    if n <= 5000:
+        stat, p = stats.shapiro(values)
+        test_name = "shapiro"
+    else:
+        stat, p = stats.kstest(values, "norm", args=(values.mean(), values.std()))
+        test_name = "ks"
+
+    if abs(skewness) < 0.5 and p > 0.05:
+        verdict = "approximately normal"
+    elif skewness > 0.5:
+        verdict = "right-skewed"
+    elif skewness < -0.5:
+        verdict = "left-skewed"
+    else:
+        verdict = "heavy-tailed"
+
+    return {
+        "column": column,
+        "dtype": str(series.dtype),
+        "n": n,
+        "mean": round(float(values.mean()), 4),
+        "median": round(float(np.median(values)), 4),
+        "std": round(float(values.std()), 4),
+        "skewness": round(skewness, 4),
+        "kurtosis": round(kurt, 4),
+        "normality_test": test_name,
+        "normality_stat": round(float(stat), 6),
+        "normality_p": round(float(p), 6),
+        "percentiles": {
+            "p5": round(float(np.percentile(values, 5)), 4),
+            "p25": round(float(np.percentile(values, 25)), 4),
+            "p75": round(float(np.percentile(values, 75)), 4),
+            "p95": round(float(np.percentile(values, 95)), 4),
+            "p99": round(float(np.percentile(values, 99)), 4),
+        },
+        "verdict": verdict,
+    }
