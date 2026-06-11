@@ -138,3 +138,63 @@ def test_mutual_information_returns_scores(reg_df):
     result = _run_mutual_information(reg_df, "cost", ["feature_a", "feature_b"], {})
     assert "mi_scores" in result["metrics"]
     assert result["explainability"] == "high"
+
+
+from databench_mcp.core.modeling import _run_kmeans, _run_pca, run_model
+
+
+def test_kmeans_returns_inertia(reg_df):
+    result = _run_kmeans(reg_df, None, ["feature_a", "feature_b"], {"k": 3})
+    assert "inertia" in result["metrics"]
+    assert "k" in result["metrics"]
+    assert "cluster_labels" in result
+    assert result["explainability"] == "low"
+
+
+def test_pca_returns_explained_variance(reg_df):
+    result = _run_pca(reg_df, None, ["feature_a", "feature_b"], {"n_components": 2})
+    assert "explained_variance_ratio" in result["metrics"]
+    assert "loadings" in result["metrics"]
+    assert result["explainability"] == "medium"
+
+
+def test_run_model_end_to_end(project_with_data):
+    result = run_model(
+        "test-proj", "providers", "linear_regression",
+        target="total_drug_cost", features=["claim_count"],
+    )
+    assert result["finding_id"] == "f001"
+    assert result["method"] == "linear_regression"
+    assert "r2" in result["metrics"]
+
+
+def test_run_model_saves_finding(project_with_data):
+    run_model("test-proj", "providers", "random_forest",
+              target="total_drug_cost", features=["claim_count"])
+    from databench_mcp.core.findings import list_findings
+    result = list_findings("test-proj")
+    assert result["count"] == 1
+    assert result["findings"][0]["method"] == "random_forest"
+
+
+def test_run_model_shap_saves_npy(project_with_data):
+    result = run_model("test-proj", "providers", "shap",
+                       target="total_drug_cost", features=["claim_count"])
+    import numpy as np
+    from databench_mcp.workspace import project_path
+    npy_path = project_path("test-proj") / "artifacts" / f"{result['finding_id']}_shap.npy"
+    assert npy_path.exists()
+    vals = np.load(str(npy_path))
+    assert vals.ndim == 2
+
+
+def test_run_model_unknown_method(project_with_data):
+    with pytest.raises(ValueError, match="unknown method"):
+        run_model("test-proj", "providers", "magic_model", target="total_drug_cost")
+
+
+def test_run_model_requires_profiled(tmp_path, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("test-proj")
+    with pytest.raises(ValueError, match="profiled"):
+        run_model("test-proj", "providers", "linear_regression", target="total_drug_cost")

@@ -396,6 +396,68 @@ def _run_mutual_information(
 
 
 # ---------------------------------------------------------------------------
+# Unsupervised: KMeans, PCA
+# ---------------------------------------------------------------------------
+
+def _run_kmeans(
+    df: pd.DataFrame, target: str | None, features: list[str], params: dict
+) -> dict[str, Any]:
+    from sklearn.cluster import KMeans
+
+    _min_rows_check(df)
+    X, _, feat_names = _prepare_xy(df, features, target or features[0])
+    k = int(params.get("k", 3))
+    model = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels = model.fit_predict(X)
+    metrics = {
+        "k": k,
+        "inertia": round(float(model.inertia_), 4),
+        "cluster_sizes": {str(i): int((labels == i).sum()) for i in range(k)},
+    }
+    return {
+        "metrics": metrics,
+        "explainability": "low",
+        "summary": f"KMeans (k={k}) — inertia={metrics['inertia']}. "
+                   f"Cluster sizes: {metrics['cluster_sizes']}.",
+        "cluster_labels": labels,
+    }
+
+
+def _run_pca(
+    df: pd.DataFrame, target: str | None, features: list[str], params: dict
+) -> dict[str, Any]:
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+
+    _min_rows_check(df)
+    X, _, feat_names = _prepare_xy(df, features, target or features[0])
+    n_components = int(params.get("n_components", min(len(feat_names), 2)))
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    model = PCA(n_components=n_components, random_state=42)
+    model.fit(X_scaled)
+    evr = [round(float(v), 4) for v in model.explained_variance_ratio_]
+    loadings = {
+        f"PC{i+1}": {n: round(float(v), 6) for n, v in zip(feat_names, model.components_[i])}
+        for i in range(n_components)
+    }
+    metrics = {
+        "n_components": n_components,
+        "explained_variance_ratio": evr,
+        "cumulative_variance": round(float(sum(evr)), 4),
+        "loadings": loadings,
+    }
+    return {
+        "metrics": metrics,
+        "explainability": "medium",
+        "summary": (
+            f"PCA ({n_components} components) explains "
+            f"{metrics['cumulative_variance']*100:.1f}% of variance."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -412,4 +474,74 @@ _REGISTRY: dict[str, Callable] = {
     "shap": _run_shap,
     "permutation_importance": _run_permutation_importance,
     "mutual_information": _run_mutual_information,
+    "kmeans": _run_kmeans,
+    "pca": _run_pca,
 }
+
+
+# ---------------------------------------------------------------------------
+# Public dispatch function
+# ---------------------------------------------------------------------------
+
+def run_model(
+    project: str,
+    table: str,
+    method: str,
+    target: str | None = None,
+    features: list[str] | None = None,
+    params: dict | None = None,
+) -> dict[str, Any]:
+    """Dispatch to a registered method, persist finding, return complete entry."""
+    assert_profiled(project, table)
+
+    if method not in _REGISTRY:
+        raise ValueError(
+            f"unknown method '{method}'. Available: {sorted(_REGISTRY)}"
+        )
+
+    with get_connection(project) as conn:
+        df = conn.execute(f'SELECT * FROM "{table}"').df()
+
+    if len(df) < 10:
+        raise ValueError(f"need at least 10 rows, got {len(df)}")
+
+    if target is not None and target not in df.columns:
+        raise ValueError(f"target '{target}' not found in table '{table}'")
+
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    resolved_features = (
+        features if features is not None
+        else [c for c in numeric_cols if c != target]
+    )
+
+    for f in resolved_features:
+        if f not in df.columns:
+            raise ValueError(f"feature '{f}' not found in table '{table}'")
+
+    result = _REGISTRY[method](df, target, resolved_features, params or {})
+
+    # Save SHAP companion npy if present
+    shap_values = result.pop("shap_values", None)
+    cluster_labels = result.pop("cluster_labels", None)
+
+    finding = add_finding(project, {
+        "method": method,
+        "target": target,
+        "features": resolved_features,
+        "metrics": result["metrics"],
+        "explainability": result["explainability"],
+        "summary": result["summary"],
+    })
+
+    if shap_values is not None:
+        artifacts_dir = project_path(project) / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+        np.save(str(artifacts_dir / f"{finding['id']}_shap.npy"), shap_values)
+
+    if cluster_labels is not None:
+        artifacts_dir = project_path(project) / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+        np.save(str(artifacts_dir / f"{finding['id']}_labels.npy"), cluster_labels)
+
+    finding["finding_id"] = finding.pop("id")
+    return finding
