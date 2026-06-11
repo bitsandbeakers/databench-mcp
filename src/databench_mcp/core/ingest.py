@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from databench_mcp.db import get_connection
-from databench_mcp.workspace import read_manifest, write_manifest
+from databench_mcp.workspace import project_path, read_manifest, write_manifest
 
 _SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".parquet", ".xlsx", ".xls"}
 
@@ -128,7 +128,6 @@ def load_url(
             f"Unsupported URL file format {ext!r}. Supported: {sorted(_SUPPORTED_EXTENSIONS)}"
         )
 
-    from databench_mcp.workspace import project_path
     raw_dir = project_path(project) / "raw"
     dest = raw_dir / f"{table_name}{ext}"
 
