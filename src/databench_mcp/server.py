@@ -11,16 +11,19 @@ from typing import Any
 from fastmcp import FastMCP
 
 from databench_mcp import __version__
+from databench_mcp.tools.analysis import analyze_correlations, analyze_distribution, detect_outliers
 from databench_mcp.tools.eda import eda_summary, sql_query
 from databench_mcp.tools.hypothesis import hypothesis_add, hypothesis_list, hypothesis_update
 from databench_mcp.tools.ingest import ingest_file, ingest_url
+from databench_mcp.tools.modeling import list_findings, run_model
 from databench_mcp.tools.profile import profile_table
 from databench_mcp.tools.project import project_create, project_list, project_status
+from databench_mcp.tools.viz import create_chart
 
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 12
+EXPECTED_TOOL_COUNT = 18
 
 
 async def ping() -> dict[str, Any]:
@@ -40,6 +43,12 @@ mcp.tool(eda_summary)
 mcp.tool(hypothesis_add)
 mcp.tool(hypothesis_list)
 mcp.tool(hypothesis_update)
+mcp.tool(detect_outliers)
+mcp.tool(analyze_distribution)
+mcp.tool(analyze_correlations)
+mcp.tool(run_model)
+mcp.tool(list_findings)
+mcp.tool(create_chart)
 
 
 def _assert_tool_count() -> None:
