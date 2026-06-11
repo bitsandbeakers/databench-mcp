@@ -30,3 +30,44 @@ def sample_parquet(tmp_path):
     path = fixtures_dir / "providers.parquet"
     df.write_parquet(path)
     return path
+
+
+import numpy as np
+import pandas as pd
+import duckdb
+import databench_mcp.workspace as ws
+
+
+@pytest.fixture
+def medicare_df():
+    """Synthetic 60-row Medicare-like DataFrame for modeling/analysis tests."""
+    rng = np.random.default_rng(42)
+    n = 60
+    return pd.DataFrame({
+        "npi": range(1001, 1001 + n),
+        "specialty": rng.choice(["Cardiology", "Oncology", "Primary Care"], n),
+        "state": rng.choice(["CA", "TX", "NY", "FL"], n),
+        "total_drug_cost": rng.exponential(scale=50000, size=n),
+        "claim_count": rng.integers(10, 500, size=n).astype(float),
+        "is_high_cost": (rng.random(n) > 0.5),
+    })
+
+
+@pytest.fixture
+def project_with_data(tmp_path, monkeypatch, medicare_df):
+    """Project with medicare_df loaded into DuckDB and manifest stamped profiled=True."""
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("test-proj")
+    db_path = str(tmp_path / "test-proj" / "project.duckdb")
+    conn = duckdb.connect(db_path)
+    conn.execute("CREATE TABLE providers AS SELECT * FROM medicare_df")
+    conn.close()
+    manifest = ws.read_manifest("test-proj")
+    manifest["datasets"]["providers"] = {
+        "row_count": len(medicare_df),
+        "col_count": len(medicare_df.columns),
+        "profiled": True,
+        "profile": {c: {"type": "DOUBLE"} for c in medicare_df.columns},
+    }
+    ws.write_manifest("test-proj", manifest)
+    return tmp_path

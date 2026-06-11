@@ -63,7 +63,10 @@ def assert_profiled(name: str, table: str) -> None:
     manifest = read_manifest(name)
     ds = manifest["datasets"].get(table)
     if ds is None:
-        raise ValueError(f"Table '{table}' not in manifest for project '{name}'")
+        raise ValueError(
+            f"Table '{table}' not in manifest for project '{name}' — "
+            f"table must be ingested and profiled before analysis"
+        )
     if not ds.get("profiled"):
         raise ValueError(
             f"Table '{table}' has not been profiled — "
