@@ -78,6 +78,7 @@ def test_quantile_regression_returns_quantile(reg_df):
                                       {"quantile": 0.75})
     assert result["metrics"]["quantile"] == 0.75
     assert "coefficients" in result["metrics"]
+    assert result["explainability"] == "low"
 
 
 def test_regression_method_raises_for_too_few_rows(reg_df):
@@ -186,6 +187,17 @@ def test_run_model_shap_saves_npy(project_with_data):
     assert npy_path.exists()
     vals = np.load(str(npy_path))
     assert vals.ndim == 2
+
+
+def test_run_model_kmeans_saves_labels_npy(project_with_data):
+    result = run_model("test-proj", "providers", "kmeans",
+                       features=["claim_count", "total_drug_cost"])
+    import numpy as np
+    from databench_mcp.workspace import project_path
+    npy_path = project_path("test-proj") / "artifacts" / f"{result['finding_id']}_labels.npy"
+    assert npy_path.exists()
+    labels = np.load(str(npy_path))
+    assert labels.ndim == 1
 
 
 def test_run_model_unknown_method(project_with_data):

@@ -22,6 +22,7 @@ _CHART_TYPES = {
     "scatter_matrix",
     "cluster_scatter",
     "shap_beeswarm",
+    "shap_waterfall",
     "partial_dependence",
 }
 
@@ -142,6 +143,9 @@ def create_chart(
         }).sort_values("mean_abs_shap", ascending=True)
         fig = px.bar(mean_abs, x="mean_abs_shap", y="feature", orientation="h",
                      title="SHAP mean absolute values (beeswarm proxy)")
+
+    elif chart_type == "shap_waterfall":
+        raise ValueError("shap_waterfall chart type is not yet implemented")
 
     elif chart_type in ("distribution_overlay", "partial_dependence"):
         raise ValueError(f"Chart type '{chart_type}' not yet implemented")

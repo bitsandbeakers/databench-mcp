@@ -217,7 +217,7 @@ def _run_quantile_regression(
     }
     return {
         "metrics": metrics,
-        "explainability": "high",
+        "explainability": "low",
         "summary": f"Quantile ({quantile}) regression on '{target}' — pinball loss={round(pinball, 4)}.",
     }
 
