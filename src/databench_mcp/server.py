@@ -11,6 +11,8 @@ from typing import Any
 from fastmcp import FastMCP
 
 from databench_mcp import __version__
+from databench_mcp.tools.eda import eda_summary, sql_query
+from databench_mcp.tools.hypothesis import hypothesis_add, hypothesis_list, hypothesis_update
 from databench_mcp.tools.ingest import ingest_file, ingest_url
 from databench_mcp.tools.profile import profile_table
 from databench_mcp.tools.project import project_create, project_list, project_status
@@ -18,7 +20,7 @@ from databench_mcp.tools.project import project_create, project_list, project_st
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 7
+EXPECTED_TOOL_COUNT = 12
 
 
 async def ping() -> dict[str, Any]:
@@ -33,6 +35,11 @@ mcp.tool(project_status)
 mcp.tool(ingest_file)
 mcp.tool(ingest_url)
 mcp.tool(profile_table)
+mcp.tool(sql_query)
+mcp.tool(eda_summary)
+mcp.tool(hypothesis_add)
+mcp.tool(hypothesis_list)
+mcp.tool(hypothesis_update)
 
 
 def _assert_tool_count() -> None:
