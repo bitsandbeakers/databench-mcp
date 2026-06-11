@@ -45,3 +45,22 @@ def test_write_and_read_manifest_roundtrip(tmp_path):
     ws.write_manifest("test-proj", manifest)
     reloaded = ws.read_manifest("test-proj")
     assert reloaded["datasets"]["tbl"]["profiled"] is False
+
+
+def test_write_manifest_is_atomic(tmp_path):
+    ws.ensure_project("test-proj")
+    manifest = ws.read_manifest("test-proj")
+    manifest["datasets"]["tbl"] = {"profiled": True}
+    ws.write_manifest("test-proj", manifest)
+    # tmp file must be cleaned up
+    assert not (tmp_path / "test-proj" / "manifest.tmp").exists()
+    # data is intact
+    assert ws.read_manifest("test-proj")["datasets"]["tbl"]["profiled"] is True
+
+
+def test_invalid_project_name_raises():
+    with pytest.raises(ValueError, match="Invalid project name"):
+        ws.ensure_project("../escape")
+
+    with pytest.raises(ValueError, match="Invalid project name"):
+        ws.ensure_project("")

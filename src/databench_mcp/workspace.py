@@ -16,12 +16,18 @@ WORKSPACE_ROOT = Path(os.environ.get("DATABENCH_WORKSPACE", "./workspace"))
 _SUBDIRS = ("raw", "artifacts", "recipes", "reports")
 
 
+def _validate_name(name: str) -> None:
+    if not name or Path(name).parts != (name,):
+        raise ValueError(f"Invalid project name {name!r}: must be a single non-empty path component")
+
+
 def project_path(name: str) -> Path:
     return WORKSPACE_ROOT / name
 
 
 def ensure_project(name: str) -> Path:
     """Create project directory tree and initialise manifest if absent. Idempotent."""
+    _validate_name(name)
     root = project_path(name)
     for subdir in _SUBDIRS:
         (root / subdir).mkdir(parents=True, exist_ok=True)
@@ -37,6 +43,7 @@ def ensure_project(name: str) -> Path:
 
 
 def read_manifest(name: str) -> dict:
+    _validate_name(name)
     path = project_path(name) / "manifest.json"
     if not path.exists():
         raise FileNotFoundError(f"Project '{name}' not found — run project_create first")
@@ -44,4 +51,8 @@ def read_manifest(name: str) -> dict:
 
 
 def write_manifest(name: str, manifest: dict) -> None:
-    (project_path(name) / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    """Write manifest atomically via a .tmp sibling to avoid corruption on crash."""
+    target = project_path(name) / "manifest.json"
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2))
+    os.replace(tmp, target)
