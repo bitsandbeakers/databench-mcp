@@ -79,7 +79,8 @@ def test_reconstruct_step_kinds(project_for_recipes):
     create_chart("p", "scatter", "data", columns=["count", "score"])
 
     result = reconstruct_recipe("p")
-    meta = yaml.safe_load(open(result["meta_yaml"]).read())
+    from pathlib import Path
+    meta = yaml.safe_load(Path(result["meta_yaml"]).read_text(encoding="utf-8"))
     kinds = [s["kind"] for s in meta["steps"]]
     assert "ingest_file" in kinds
     assert "profile_table" in kinds
@@ -124,6 +125,7 @@ def test_run_recipe_idempotent_clean(project_for_recipes):
     result = run_recipe("p")  # second run: should still be clean (deterministic data)
     assert result["status"] == "clean"
     assert result["changes"] == []
+    assert len(result["finding_ids"]) > 0
 
 
 def test_run_recipe_detects_changed_metric(project_for_recipes):
@@ -143,6 +145,13 @@ def test_run_recipe_detects_changed_metric(project_for_recipes):
             if "inertia" in step["expected"].get("metrics", {}):
                 step["expected"]["metrics"]["inertia"] = -999.0
     meta_path.write_text(yaml.dump(meta, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+
+    # verify the corruption actually landed before testing the diff
+    reloaded = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+    assert any(
+        (s.get("expected") or {}).get("metrics", {}).get("inertia") == -999.0
+        for s in reloaded["steps"]
+    ), "test precondition: inertia not in expected metrics — check kmeans metric keys"
 
     result = run_recipe("p")
     assert result["status"] == "changed"
