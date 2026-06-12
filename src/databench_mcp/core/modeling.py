@@ -1,6 +1,7 @@
 """Model registry and method handlers for run_model dispatch."""
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 import numpy as np
@@ -458,6 +459,149 @@ def _run_pca(
 
 
 # ---------------------------------------------------------------------------
+# Network analysis
+# ---------------------------------------------------------------------------
+
+def _validate_network_params(df: pd.DataFrame, params: dict) -> tuple[str, str, str | None]:
+    source_col = params.get("source_col")
+    target_col = params.get("target_col")
+    if not source_col or not target_col:
+        raise ValueError("network methods require 'source_col' and 'target_col' in params")
+    for col in (source_col, target_col):
+        if col not in df.columns:
+            raise ValueError(f"column '{col}' not found in table")
+    weight_col = params.get("weight_col")
+    return source_col, target_col, weight_col
+
+
+def _build_network_graph(df: pd.DataFrame, source_col: str, target_col: str, weight_col: str | None):
+    import igraph as ig
+    src = df[source_col].astype(str).tolist()
+    tgt = df[target_col].astype(str).tolist()
+    if weight_col:
+        tuples = list(zip(src, tgt, df[weight_col].tolist()))
+        G = ig.Graph.TupleList(tuples, directed=False, weights=True)
+    else:
+        tuples = list(zip(src, tgt))
+        G = ig.Graph.TupleList(tuples, directed=False, weights=False)
+    return G
+
+
+def _run_network_stats(
+    df: pd.DataFrame, target: str | None, features: list[str], params: dict
+) -> dict[str, Any]:
+    source_col, target_col, weight_col = _validate_network_params(df, params)
+    G = _build_network_graph(df, source_col, target_col, weight_col)
+    if G.vcount() < 2:
+        raise ValueError("need at least 2 nodes to build a network")
+    components = G.connected_components(mode="weak")
+    node_count = G.vcount()
+    edge_count = G.ecount()
+    largest_cc_size = max(len(c) for c in components)
+    degrees = G.degree()
+    avg_degree = round(sum(degrees) / node_count, 4) if node_count else 0.0
+    density = round(G.density(), 6)
+    num_components = len(components)
+    metrics = {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "density": density,
+        "avg_degree": avg_degree,
+        "num_components": num_components,
+        "largest_component_fraction": round(largest_cc_size / node_count, 4),
+    }
+    return {
+        "metrics": metrics,
+        "explainability": "high",
+        "summary": (
+            f"Network has {node_count} nodes and {edge_count} edges "
+            f"(density={density:.4f}, {num_components} component(s))."
+        ),
+    }
+
+
+def _run_network_centrality(
+    df: pd.DataFrame, target: str | None, features: list[str], params: dict
+) -> dict[str, Any]:
+    source_col, target_col, weight_col = _validate_network_params(df, params)
+    compute_betweenness = bool(params.get("betweenness", True))
+    top_n = int(params.get("top_n", 10))
+    G = _build_network_graph(df, source_col, target_col, weight_col)
+    if G.vcount() < 2:
+        raise ValueError("need at least 2 nodes to build a network")
+    names = G.vs["name"]
+    degrees = G.degree()
+    pageranks = G.pagerank()
+    centrality_full: dict[str, dict] = {
+        name: {"degree": float(deg), "pagerank": round(float(pr), 6)}
+        for name, deg, pr in zip(names, degrees, pageranks)
+    }
+    if compute_betweenness:
+        betweenness = G.betweenness(directed=False)
+        for name, bw in zip(names, betweenness):
+            centrality_full[name]["betweenness"] = round(float(bw), 6)
+
+    def _top(key: str) -> list[dict]:
+        return sorted(
+            [{"node": name, key: centrality_full[name][key]} for name in names],
+            key=lambda x: x[key], reverse=True
+        )[:top_n]
+
+    metrics: dict[str, Any] = {
+        "top_by_degree": _top("degree"),
+        "top_by_pagerank": _top("pagerank"),
+    }
+    if compute_betweenness:
+        metrics["top_by_betweenness"] = _top("betweenness")
+    top_node = metrics["top_by_degree"][0]["node"] if metrics["top_by_degree"] else "N/A"
+    top_degree = metrics["top_by_degree"][0]["degree"] if metrics["top_by_degree"] else 0
+    return {
+        "metrics": metrics,
+        "explainability": "medium",
+        "summary": (
+            f"Network centrality — most connected node: {top_node} "
+            f"(degree={top_degree})."
+        ),
+        "centrality": centrality_full,
+    }
+
+
+def _run_network_communities(
+    df: pd.DataFrame, target: str | None, features: list[str], params: dict
+) -> dict[str, Any]:
+    from collections import Counter
+    source_col, target_col, weight_col = _validate_network_params(df, params)
+    G = _build_network_graph(df, source_col, target_col, weight_col)
+    if G.vcount() < 2:
+        raise ValueError("need at least 2 nodes to build a network")
+    names = G.vs["name"]
+    communities = G.community_multilevel(
+        weights="weight" if weight_col else None,
+        return_levels=False,
+    )
+    membership = communities.membership
+    modularity = round(float(G.modularity(membership)), 6)
+    num_communities = len(set(membership))
+    comm_sizes = Counter(membership)
+    community_sizes = {str(k): v for k, v in sorted(comm_sizes.items())}
+    communities_dict = {name: int(comm) for name, comm in zip(names, membership)}
+    metrics = {
+        "num_communities": num_communities,
+        "modularity": modularity,
+        "community_sizes": community_sizes,
+    }
+    return {
+        "metrics": metrics,
+        "explainability": "low",
+        "summary": (
+            f"Louvain detected {num_communities} communities "
+            f"(modularity={modularity:.4f})."
+        ),
+        "communities": communities_dict,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -476,6 +620,9 @@ _REGISTRY: dict[str, Callable] = {
     "mutual_information": _run_mutual_information,
     "kmeans": _run_kmeans,
     "pca": _run_pca,
+    "network_stats": _run_network_stats,
+    "network_centrality": _run_network_centrality,
+    "network_communities": _run_network_communities,
 }
 
 
@@ -523,6 +670,8 @@ def run_model(
     # Save SHAP companion npy if present
     shap_values = result.pop("shap_values", None)
     cluster_labels = result.pop("cluster_labels", None)
+    communities_data = result.pop("communities", None)
+    centrality_data = result.pop("centrality", None)
 
     finding = add_finding(project, {
         "method": method,
@@ -542,6 +691,20 @@ def run_model(
         artifacts_dir = project_path(project) / "artifacts"
         artifacts_dir.mkdir(exist_ok=True)
         np.save(str(artifacts_dir / f"{finding['id']}_labels.npy"), cluster_labels)
+
+    if communities_data is not None:
+        artifacts_dir = project_path(project) / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+        (artifacts_dir / f"{finding['id']}_communities.json").write_text(
+            json.dumps(communities_data)
+        )
+
+    if centrality_data is not None:
+        artifacts_dir = project_path(project) / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+        (artifacts_dir / f"{finding['id']}_centrality.json").write_text(
+            json.dumps(centrality_data)
+        )
 
     finding["finding_id"] = finding.pop("id")
     return finding
