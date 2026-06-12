@@ -65,8 +65,9 @@ def test_create_chart_saves_sidecar_json(project_with_data):
     html_path = Path(result["path"])
     sidecar = html_path.parent / (html_path.stem + "_params.json")
     assert sidecar.exists(), "sidecar params JSON should be saved alongside HTML"
-    data = json.loads(sidecar.read_text())
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
     assert data["chart_type"] == "scatter"
     assert data["table"] == "providers"
     assert data["columns"] == ["claim_count", "total_drug_cost"]
     assert data["finding_id"] is None
+    assert "params" in data

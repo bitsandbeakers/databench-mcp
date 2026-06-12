@@ -44,7 +44,7 @@ def _save(fig, project: str, chart_type: str, params_dict: dict | None = None) -
     fig.write_html(str(path))
     if params_dict is not None:
         sidecar = _charts_dir(project) / f"{chart_type}_{ts}_params.json"
-        sidecar.write_text(json.dumps(params_dict))
+        sidecar.write_text(json.dumps(params_dict), encoding="utf-8")
     return str(path)
 
 
