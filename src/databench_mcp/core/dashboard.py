@@ -55,7 +55,7 @@ def _export_tables(project: str, tables: list[str], data_dir: Path) -> None:
     with get_connection(project) as conn:
         for table in tables:
             path = data_dir / f"{table}.parquet"
-            conn.execute(f'COPY "{table}" TO {str(path)!r} (FORMAT PARQUET)')
+            conn.execute(f'COPY "{table}" TO {path.as_posix()!r} (FORMAT PARQUET)')
 
 
 def _load_findings(project: str) -> list[dict]:
