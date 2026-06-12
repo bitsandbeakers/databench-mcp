@@ -13,3 +13,4 @@ workspace/
 
 # claude worktrees (per-machine)
 .claude/worktrees/
+.worktrees/
