@@ -167,12 +167,6 @@ def _make_figure(chart_type, df, columns, params):
         locations_col, color_col = columns[0], columns[1]
         _loc_fmt = {"iso-3": "ISO-3", "iso-2": "ISO-2", "usa-states": "USA-states"}
         locationmode = _loc_fmt.get(params.get("locations_format", "iso-3"), "ISO-3")
-        _presets = {
-            "world": {"zoom": 1, "center": {"lat": 0, "lon": 0}},
-            "usa": {"zoom": 3, "center": {"lat": 37.09, "lon": -95.71}},
-            "europe": {"zoom": 3, "center": {"lat": 54.53, "lon": 15.26}},
-        }
-        preset = _presets.get(params.get("scope", "world"), _presets["world"])
         return px.choropleth(
             df, locations=locations_col, color=color_col,
             locationmode=locationmode,
