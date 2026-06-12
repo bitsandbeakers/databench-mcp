@@ -89,6 +89,96 @@ def _make_figure(chart_type, df, columns, params):
                 showlegend=False,
             )
         )
+    elif chart_type == "line":
+        x_col, y_col = columns[0], columns[1]
+        return px.line(df, x=x_col, y=y_col, color=params.get("color"),
+                       title=f"{y_col} over {x_col}")
+    elif chart_type == "bar":
+        x_col, y_col = columns[0], columns[1]
+        return px.bar(df, x=x_col, y=y_col, color=params.get("color"),
+                      barmode=params.get("barmode", "relative"),
+                      title=f"{y_col} by {x_col}")
+    elif chart_type == "horizontal_bar":
+        cat_col, val_col = columns[0], columns[1]
+        return px.bar(df, x=val_col, y=cat_col, color=params.get("color"),
+                      barmode=params.get("barmode", "relative"),
+                      orientation="h", title=f"{val_col} by {cat_col}")
+    elif chart_type == "pie":
+        names_col, values_col = columns[0], columns[1]
+        hole = float(params.get("hole", 0))
+        return px.pie(df, names=names_col, values=values_col, hole=hole,
+                      title=f"{values_col} by {names_col}")
+    elif chart_type == "bubble":
+        x_col, y_col = columns[0], columns[1]
+        size_col = params.get("size_col")
+        return px.scatter(df, x=x_col, y=y_col, size=size_col,
+                          color=params.get("color"),
+                          title=f"{x_col} vs {y_col}" + (f" (size: {size_col})" if size_col else ""))
+    elif chart_type == "dot":
+        cat_col, val_col = columns[0], columns[1]
+        sorted_df = df[[cat_col, val_col]].dropna().sort_values(val_col, ascending=True)
+        fig = go.Figure(go.Scatter(
+            x=sorted_df[val_col].tolist(),
+            y=sorted_df[cat_col].astype(str).tolist(),
+            mode="markers",
+            marker=dict(size=10, color=params.get("color") or "steelblue"),
+        ))
+        fig.update_layout(title=f"{val_col} by {cat_col}", yaxis=dict(type="category"))
+        return fig
+    elif chart_type == "table":
+        max_rows = int(params.get("max_rows", 100))
+        display_df = df[columns].head(max_rows) if columns else df.head(max_rows)
+        fig = go.Figure(go.Table(
+            header=dict(values=list(display_df.columns),
+                        fill_color="paleturquoise", align="left"),
+            cells=dict(values=[display_df[c].tolist() for c in display_df.columns],
+                       fill_color="lavender", align="left"),
+        ))
+        fig.update_layout(title="Table" + (": " + ", ".join(columns) if columns else ""))
+        return fig
+    elif chart_type == "dumbbell":
+        cat_col, val1_col, val2_col = columns[0], columns[1], columns[2]
+        color1 = params.get("color1", "steelblue")
+        color2 = params.get("color2", "firebrick")
+        df_s = df[[cat_col, val1_col, val2_col]].dropna().sort_values(val1_col)
+        cats = df_s[cat_col].astype(str).tolist()
+        vals1 = df_s[val1_col].tolist()
+        vals2 = df_s[val2_col].tolist()
+        lx, ly = [], []
+        for v1, v2, cat in zip(vals1, vals2, cats):
+            lx += [v1, v2, None]; ly += [cat, cat, None]
+        fig = go.Figure([
+            go.Scatter(x=lx, y=ly, mode="lines", line=dict(color="gray", width=1),
+                       hoverinfo="none", showlegend=False),
+            go.Scatter(x=vals1, y=cats, mode="markers", name=val1_col,
+                       marker=dict(size=10, color=color1)),
+            go.Scatter(x=vals2, y=cats, mode="markers", name=val2_col,
+                       marker=dict(size=10, color=color2)),
+        ])
+        fig.update_layout(title=f"{val1_col} vs {val2_col} by {cat_col}",
+                          yaxis=dict(type="category"))
+        return fig
+    elif chart_type == "parallel_categories":
+        return px.parallel_categories(
+            df, dimensions=columns, color=params.get("color_col"),
+            title="Parallel categories: " + ", ".join(columns),
+        )
+    elif chart_type == "choropleth_map":
+        locations_col, color_col = columns[0], columns[1]
+        _loc_fmt = {"iso-3": "ISO-3", "iso-2": "ISO-2", "usa-states": "USA-states"}
+        locationmode = _loc_fmt.get(params.get("locations_format", "iso-3"), "ISO-3")
+        _presets = {
+            "world": {"zoom": 1, "center": {"lat": 0, "lon": 0}},
+            "usa": {"zoom": 3, "center": {"lat": 37.09, "lon": -95.71}},
+            "europe": {"zoom": 3, "center": {"lat": 54.53, "lon": 15.26}},
+        }
+        preset = _presets.get(params.get("scope", "world"), _presets["world"])
+        return px.choropleth(
+            df, locations=locations_col, color=color_col,
+            locationmode=locationmode,
+            scope=params.get("scope", "world"),
+            title=f"{color_col} by {locations_col}",
+        )
     return go.Figure(layout=go.Layout(title=f"Unsupported: {chart_type}"))
 
 """
@@ -109,8 +199,12 @@ def _read_sidecars(project: str) -> tuple[dict[str, list[dict]], list[dict]]:
     if not charts_dir.exists():
         return {}, []
 
-    _RENDERABLE = {"histogram", "boxplot", "scatter", "scatter_matrix",
-                   "correlation_heatmap", "network_graph"}
+    _RENDERABLE = {
+        "histogram", "boxplot", "scatter", "scatter_matrix",
+        "correlation_heatmap", "network_graph",
+        "line", "bar", "horizontal_bar", "pie", "bubble",
+        "dot", "table", "dumbbell", "parallel_categories", "choropleth_map",
+    }
     _SKIP_ALWAYS = {"cluster_scatter", "shap_beeswarm", "feature_importance_bar",
                     "shap_waterfall", "distribution_overlay", "partial_dependence"}
 

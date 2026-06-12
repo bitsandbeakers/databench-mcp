@@ -22,12 +22,12 @@ from databench_mcp.tools.modeling import list_findings, run_model
 from databench_mcp.tools.profile import profile_table
 from databench_mcp.tools.project import project_create, project_list, project_status
 from databench_mcp.tools.recipes import reconstruct_recipe, run_recipe
-from databench_mcp.tools.viz import create_chart
+from databench_mcp.tools.viz import create_chart, create_subplot
 
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 22
+EXPECTED_TOOL_COUNT = 23
 
 
 async def ping() -> dict[str, Any]:
@@ -54,6 +54,7 @@ mcp.tool(analyze_correlations)
 mcp.tool(run_model)
 mcp.tool(list_findings)
 mcp.tool(create_chart)
+mcp.tool(create_subplot)
 mcp.tool(reconstruct_recipe)
 mcp.tool(run_recipe)
 mcp.tool(build_dashboard)
