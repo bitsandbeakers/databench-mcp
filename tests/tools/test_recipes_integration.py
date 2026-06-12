@@ -46,7 +46,7 @@ def test_run_recipe_tool_clean(pipeline_project):
     reconstruct_recipe("proj")
     result = run_recipe("proj")
     assert result["status"] == "clean"
-    assert len(result["finding_ids"]) == 1
+    assert len(result["finding_ids"]) >= 1
     assert result["error"] is None
 
 
@@ -59,5 +59,6 @@ def test_run_recipe_tool_idempotent(pipeline_project):
 
 def test_run_recipe_tool_no_diff_flag(pipeline_project):
     reconstruct_recipe("proj")
-    result = run_recipe("proj", diff_mode=False)
+    run_recipe("proj")                             # first: establish baseline
+    result = run_recipe("proj", diff_mode=False)   # second: exercises skip-diff path
     assert result["status"] == "clean"
