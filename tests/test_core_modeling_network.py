@@ -112,7 +112,7 @@ def test_network_communities_community_sizes_sum_to_node_count(edge_df):
         edge_df, None, [], {"source_col": "source", "target_col": "target"}
     )
     total = sum(result["metrics"]["community_sizes"].values())
-    assert total == result["metrics"]["num_communities"] or total > 0
+    assert total == 50  # sum of community sizes equals total node count
     # communities dict covers all nodes
     assert len(result["communities"]) == 50
 
