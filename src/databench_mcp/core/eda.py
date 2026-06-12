@@ -410,10 +410,15 @@ def enrich_table(
     how: str = "inner",
 ) -> dict:
     """Join two profiled tables and register the result."""
-    # Validate how
-    valid_how = {"inner", "left", "right", "full"}
-    if how not in valid_how:
-        raise ValueError(f"unknown join type '{how}'")
+    # Build HOW clause (validate by dict lookup)
+    how_clause_map = {
+        "inner": "INNER",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "full": "FULL OUTER",
+    }
+    if how not in how_clause_map:
+        raise ValueError(f"unknown join type {how!r}")
 
     # Validate table names and new_table_name
     ident_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -439,17 +444,10 @@ def enrich_table(
     assert_profiled(project, left_table)
     assert_profiled(project, right_table)
 
-    # Build HOW clause
-    how_clause_map = {
-        "inner": "INNER",
-        "left": "LEFT",
-        "right": "RIGHT",
-        "full": "FULL OUTER",
-    }
     how_clause = how_clause_map[how]
 
     # Build USING clause
-    using_cols = ", ".join(f'"{col}"' for col in on_list)
+    using_cols = ", ".join(on_list)
     using_clause = f"USING ({using_cols})"
 
     sql = (

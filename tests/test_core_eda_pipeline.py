@@ -436,3 +436,31 @@ def test_enrich_table_unprofiled_right_table(project, monkeypatch):
         conn.execute("CREATE OR REPLACE TABLE unregistered AS SELECT 1 AS x")
     with pytest.raises(ValueError):
         enrich_table("p", "sales", "unregistered", "region", "should_fail")
+
+
+def test_enrich_table_multi_column_on(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    # Create a second table sharing two columns with sales
+    import duckdb
+    from databench_mcp.workspace import project_path, read_manifest, write_manifest
+    db_path = project_path("p") / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        # units values (10, 20) match the sales fixture rows for region 'A'
+        conn.execute("CREATE OR REPLACE TABLE sales_meta AS SELECT * FROM (VALUES ('A', 10, 'active'), ('A', 20, 'premium')) AS t(region, units, status)")
+    manifest = read_manifest("p")
+    manifest["datasets"]["sales_meta"] = {
+        "source": "ingest_file",
+        "profiled": True,
+        "profile": {
+            "region": {"type": "VARCHAR", "null_pct": 0.0, "approx_unique": 2},
+            "units": {"type": "INT", "null_pct": 0.0, "approx_unique": 2},
+            "status": {"type": "VARCHAR", "null_pct": 0.0, "approx_unique": 2},
+        },
+        "row_count": 2,
+    }
+    write_manifest("p", manifest)
+    result = enrich_table("p", "sales", "sales_meta", ["region", "units"], "sales_multi_join")
+    assert result["rows"] > 0
+    assert result["on"] == ["region", "units"]
+    assert "status" in [c for c in result.get("on", [])] or result["columns"] > 0
