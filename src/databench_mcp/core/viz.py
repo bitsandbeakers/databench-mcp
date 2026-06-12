@@ -431,6 +431,70 @@ def _render_figure(
     raise ValueError(f"Unknown chart type '{chart_type}'. Available: {sorted(_CHART_TYPES)}")
 
 
+def create_subplot(
+    project: str,
+    charts: list[dict],
+    rows: int,
+    cols: int,
+    title: str | None = None,
+    shared_xaxes: bool = False,
+    shared_yaxes: bool = False,
+) -> dict[str, Any]:
+    """Combine multiple charts into a single subplot grid HTML."""
+    if len(charts) > rows * cols:
+        raise ValueError(
+            f"{len(charts)} charts do not fit in {rows}×{cols} grid "
+            f"(max {rows * cols})"
+        )
+
+    specs = [
+        [{"type": _SUBPLOT_TYPE.get(
+            charts[r * cols + c]["chart_type"] if r * cols + c < len(charts) else "xy",
+            "xy"
+         )}
+         for c in range(cols)]
+        for r in range(rows)
+    ]
+    subplot_titles = [c.get("title", c.get("chart_type", "")) for c in charts]
+    subplot_titles += [""] * (rows * cols - len(charts))
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        specs=specs,
+        subplot_titles=subplot_titles,
+        shared_xaxes=shared_xaxes,
+        shared_yaxes=shared_yaxes,
+    )
+
+    for i, chart_spec in enumerate(charts):
+        ct = chart_spec["chart_type"]
+        tbl = chart_spec["table"]
+        chcols = chart_spec.get("columns", [])
+        chparams = chart_spec.get("params", {})
+
+        assert_profiled(project, tbl)
+
+        if ct == "network_graph":
+            df = _load_df(project, tbl, None)
+        elif ct == "bubble" and chparams.get("size_col"):
+            df = _load_df(project, tbl, list(chcols) + [chparams["size_col"]])
+        elif not chcols or ct in ("correlation_heatmap", "table"):
+            df = _load_df(project, tbl, None)
+        else:
+            df = _load_df(project, tbl, chcols)
+
+        sub_fig = _render_figure(ct, df, chcols, chparams)
+        r, c = i // cols + 1, i % cols + 1
+        for trace in sub_fig.data:
+            fig.add_trace(trace, row=r, col=c)
+
+    if title:
+        fig.update_layout(title_text=title)
+
+    path = _save(fig, project, "subplot", params_dict=None)
+    return {"path": path, "rows": rows, "cols": cols, "charts_count": len(charts)}
+
+
 def create_chart(
     project: str,
     chart_type: str,
