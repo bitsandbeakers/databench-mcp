@@ -5,8 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from databench_mcp.core.findings import _read_findings as _load_findings
 from databench_mcp.db import get_connection
 from databench_mcp.workspace import project_path
 
@@ -140,13 +139,6 @@ def _export_tables(project: str, tables: list[str], data_dir: Path) -> None:
         for table in tables:
             path = data_dir / f"{table}.parquet"
             conn.execute(f'COPY "{table}" TO {path.as_posix()!r} (FORMAT PARQUET)')
-
-
-def _load_findings(project: str) -> list[dict]:
-    path = project_path(project) / "findings.yaml"
-    if not path.exists():
-        return []
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or []
 
 
 def _format_metrics(metrics: dict) -> str:
