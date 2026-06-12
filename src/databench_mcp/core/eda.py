@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from databench_mcp.db import get_connection
-from databench_mcp.workspace import read_manifest
+from databench_mcp.workspace import read_manifest, write_manifest
 
 _SELECT_PATTERN = re.compile(r"^\s*(SELECT|WITH)\b", re.IGNORECASE)
 _DEFAULT_LIMIT = 500
@@ -80,3 +80,28 @@ def eda_summary(project: str) -> dict[str, Any]:
         "dataset_count": len(result_datasets),
         "datasets": result_datasets,
     }
+
+
+def derive_table(project: str, sql: str, table_name: str) -> dict[str, Any]:
+    """Materialise a SQL SELECT as a new DuckDB table; register in manifest as profiled=False."""
+    stripped = sql.strip().rstrip(";")
+    if not _SELECT_PATTERN.match(stripped):
+        raise ValueError("Only SELECT or WITH queries are permitted")
+    if ";" in stripped:
+        raise ValueError("Multi-statement queries are not permitted")
+
+    with get_connection(project) as conn:
+        conn.execute(f'CREATE OR REPLACE TABLE "{table_name}" AS ({stripped})')
+        row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+        col_count = len(conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0').description)
+
+    manifest = read_manifest(project)
+    manifest["datasets"][table_name] = {
+        "source": "derived",
+        "sql": stripped,
+        "profiled": False,
+        "row_count": int(row_count),
+        "col_count": int(col_count),
+    }
+    write_manifest(project, manifest)
+    return {"table": table_name, "rows": int(row_count), "columns": int(col_count)}
