@@ -11,7 +11,7 @@ def tmp_workspace(tmp_path, monkeypatch):
 
 def test_ensure_project_creates_subdirs(tmp_path):
     ws.ensure_project("test-proj")
-    for subdir in ("raw", "artifacts", "recipes", "reports"):
+    for subdir in ("raw", "artifacts", "recipes", "reports", "dashboards"):
         assert (tmp_path / "test-proj" / subdir).is_dir()
 
 
@@ -89,6 +89,6 @@ def test_assert_profiled_raises_for_unknown_table(tmp_path):
         ws.assert_profiled("test-proj", "ghost_table")
 
 
-def test_ensure_project_creates_dashboards_dir(tmp_path):
+def test_project_create_scaffolds_dashboards_dir(tmp_path):
     ws.ensure_project("test-proj")
     assert (tmp_path / "test-proj" / "dashboards").is_dir()
