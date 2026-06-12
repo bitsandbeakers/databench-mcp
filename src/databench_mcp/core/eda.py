@@ -318,6 +318,87 @@ def add_lag(
     }
 
 
+_ROLLING_AGG_MAP = {
+    "mean": "AVG",
+    "sum": "SUM",
+    "min": "MIN",
+    "max": "MAX",
+    "std": "STDDEV",
+}
+
+
+def add_rolling(
+    project: str,
+    table: str,
+    col: str,
+    window: int,
+    agg_fn: str,
+    new_table_name: str,
+    time_col: str | None = None,
+) -> dict:
+    """Materialise a new table with a rolling-window aggregate column appended."""
+    from databench_mcp.workspace import assert_profiled
+
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
+        raise ValueError(f"table must be a simple identifier (got {table!r})")
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", new_table_name):
+        raise ValueError(
+            f"new_table_name must be a simple identifier (got {new_table_name!r})"
+        )
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", col):
+        raise ValueError(f"col must be a simple identifier (got {col!r})")
+    if time_col is not None and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", time_col):
+        raise ValueError(f"time_col must be a simple identifier (got {time_col!r})")
+    if not isinstance(window, int) or window <= 0:
+        raise ValueError("window must be a positive integer")
+    if agg_fn not in _ROLLING_AGG_MAP:
+        raise ValueError(f"unknown agg_fn {agg_fn!r}")
+
+    assert_profiled(project, table)
+
+    if time_col is None:
+        warnings.warn(
+            "add_rolling: time_col not specified — rolling values will be in arbitrary row order",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    sql_fn = _ROLLING_AGG_MAP[agg_fn]
+    new_col = f"{col}_rolling_{window}_{agg_fn}"
+    order_clause = f'ORDER BY "{time_col}" ' if time_col is not None else ""
+    over_clause = f"({order_clause}ROWS BETWEEN {window - 1} PRECEDING AND CURRENT ROW)"
+    body = (
+        f'SELECT *, {sql_fn}("{col}") OVER {over_clause} AS "{new_col}" '
+        f'FROM "{table}"'
+    )
+    sql = f'CREATE OR REPLACE TABLE "{new_table_name}" AS ({body})'
+
+    with get_connection(project) as conn:
+        conn.execute(sql)
+        row_count = conn.execute(
+            f'SELECT COUNT(*) FROM "{new_table_name}"'
+        ).fetchone()[0]
+
+    manifest = read_manifest(project)
+    manifest["datasets"][new_table_name] = {
+        "source": "add_rolling",
+        "source_table": table,
+        "col": col,
+        "window": window,
+        "agg_fn": agg_fn,
+        "profiled": False,
+        "row_count": int(row_count),
+    }
+    write_manifest(project, manifest)
+
+    return {
+        "table": new_table_name,
+        "source_table": table,
+        "new_col": new_col,
+        "rows": int(row_count),
+    }
+
+
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
     stripped = sql.strip().rstrip(";")

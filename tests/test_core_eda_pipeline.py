@@ -5,7 +5,7 @@ import duckdb
 import pytest
 
 import databench_mcp.workspace as ws
-from databench_mcp.core.eda import group_summary, clean_table, add_lag
+from databench_mcp.core.eda import group_summary, clean_table, add_lag, add_rolling
 
 
 @pytest.fixture
@@ -241,3 +241,63 @@ def test_add_lag_invalid_time_col_identifier(project, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
     with pytest.raises(ValueError, match="time_col must be"):
         add_lag("p", "sales", "revenue", [1], "should_fail", time_col='u"nits')
+
+
+# --- add_rolling tests ---
+
+def test_add_rolling_basic(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    result = add_rolling("p", "sales", "revenue", 2, "mean", "sales_rolled")
+    assert result["table"] == "sales_rolled"
+    assert result["source_table"] == "sales"
+    assert result["rows"] == 4
+    assert result["new_col"] == "revenue_rolling_2_mean"
+
+
+def test_add_rolling_column_in_db(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    add_rolling("p", "sales", "revenue", 3, "sum", "sales_rolled2")
+    db_path = project / "p" / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        cols = [r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'sales_rolled2'"
+        ).fetchall()]
+    assert "revenue_rolling_3_sum" in cols
+    assert "revenue" in cols
+
+
+def test_add_rolling_with_time_col(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    result = add_rolling("p", "sales", "revenue", 2, "min", "sales_rolled3", time_col="units")
+    assert result["rows"] == 4
+
+
+def test_add_rolling_registers_manifest(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    add_rolling("p", "sales", "revenue", 2, "max", "sales_rolled_m")
+    from databench_mcp.workspace import read_manifest
+    manifest = read_manifest("p")
+    ds = manifest["datasets"]["sales_rolled_m"]
+    assert ds["source"] == "add_rolling"
+    assert ds["source_table"] == "sales"
+    assert ds["col"] == "revenue"
+    assert ds["window"] == 2
+    assert ds["agg_fn"] == "max"
+
+
+def test_add_rolling_invalid_window(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="window must be"):
+        add_rolling("p", "sales", "revenue", 0, "mean", "should_fail")
+
+
+def test_add_rolling_unknown_agg_fn(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="unknown agg_fn"):
+        add_rolling("p", "sales", "revenue", 2, "median", "should_fail")
+
+
+def test_add_rolling_invalid_col_identifier(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="col must be"):
+        add_rolling("p", "sales", 're"venue', 2, "mean", "should_fail")
