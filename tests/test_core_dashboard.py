@@ -168,3 +168,81 @@ def test_build_dashboard_fallback_all_tables(raw_only_project):
     assert "items" in result["tables_exported"]
     assert result["warning"] is not None
     assert "no derived tables" in result["warning"]
+
+
+def test_filterable_cols_detection(tmp_path, monkeypatch):
+    """Low-cardinality VARCHAR column generates dropdown + callback in dashboard.py."""
+    import json
+    import duckdb
+    import databench_mcp.workspace as ws
+    from databench_mcp.core.dashboard import build_dashboard
+
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("fc")
+
+    conn = duckdb.connect(str(tmp_path / "fc" / "project.duckdb"))
+    conn.execute("""
+        CREATE TABLE enriched AS
+        SELECT 'APAC' AS region, 100.0 AS value UNION ALL
+        SELECT 'EMEA', 200.0
+    """)
+    conn.close()
+
+    manifest = ws.read_manifest("fc")
+    manifest["datasets"]["enriched"] = {
+        "source": "enrich_table",
+        "profiled": True, "row_count": 2, "col_count": 2,
+        "profile": {
+            "region": {"type": "VARCHAR", "null_pct": 0, "approx_unique": 2},
+            "value":  {"type": "DOUBLE",  "null_pct": 0, "approx_unique": 2},
+        },
+    }
+    ws.write_manifest("fc", manifest)
+
+    charts_dir = tmp_path / "fc" / "charts"
+    charts_dir.mkdir()
+    (charts_dir / "enriched_hist_params.json").write_text(json.dumps(
+        {"chart_type": "histogram", "table": "enriched", "columns": ["value"]}
+    ))
+
+    build_dashboard("fc")
+    src = (tmp_path / "fc" / "dashboards" / "dashboard.py").read_text()
+    assert 'filter-enriched-region' in src
+    assert 'update_enriched_charts' in src
+
+
+def test_no_filterable_cols_static(tmp_path, monkeypatch):
+    """Numeric-only derived table gets no callback (static layout)."""
+    import json
+    import duckdb
+    import databench_mcp.workspace as ws
+    from databench_mcp.core.dashboard import build_dashboard
+
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("nf")
+
+    conn = duckdb.connect(str(tmp_path / "nf" / "project.duckdb"))
+    conn.execute("CREATE TABLE metrics AS SELECT 1.0 AS a, 2.0 AS b")
+    conn.close()
+
+    manifest = ws.read_manifest("nf")
+    manifest["datasets"]["metrics"] = {
+        "source": "add_rolling",
+        "profiled": True, "row_count": 1, "col_count": 2,
+        "profile": {
+            "a": {"type": "DOUBLE", "null_pct": 0, "approx_unique": 1},
+            "b": {"type": "DOUBLE", "null_pct": 0, "approx_unique": 1},
+        },
+    }
+    ws.write_manifest("nf", manifest)
+
+    charts_dir = tmp_path / "nf" / "charts"
+    charts_dir.mkdir()
+    (charts_dir / "metrics_hist_params.json").write_text(json.dumps(
+        {"chart_type": "histogram", "table": "metrics", "columns": ["a"]}
+    ))
+
+    build_dashboard("nf")
+    src = (tmp_path / "nf" / "dashboards" / "dashboard.py").read_text()
+    assert 'update_metrics_charts' not in src
+    assert 'filter-metrics' not in src
