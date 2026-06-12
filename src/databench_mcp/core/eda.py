@@ -460,11 +460,10 @@ def enrich_table(
         f')' 
     )
 
-    conn = get_connection(project)
-    conn.execute(sql)
-
-    row_count = conn.execute(f'SELECT COUNT(*) FROM "{new_table_name}"').fetchone()[0]
-    col_count = len(conn.execute(f'SELECT * FROM "{new_table_name}" LIMIT 0').description)
+    with get_connection(project) as conn:
+        conn.execute(sql)
+        row_count = conn.execute(f'SELECT COUNT(*) FROM "{new_table_name}"').fetchone()[0]
+        col_count = len(conn.execute(f'SELECT * FROM "{new_table_name}" LIMIT 0').description)
 
     manifest = read_manifest(project)
     manifest["datasets"][new_table_name] = {

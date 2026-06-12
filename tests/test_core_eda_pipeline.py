@@ -423,3 +423,16 @@ def test_enrich_table_on_string_normalised(project, monkeypatch):
     result = enrich_table("p", "sales", "regions", "region", "sales_enriched4")
     assert isinstance(result["on"], list)
     assert result["on"] == ["region"]
+
+
+def test_enrich_table_unprofiled_right_table(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    # Register a table in the DB but NOT in the manifest (so assert_profiled raises)
+    import duckdb
+    from databench_mcp.workspace import project_path
+    db_path = project_path("p") / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        conn.execute("CREATE OR REPLACE TABLE unregistered AS SELECT 1 AS x")
+    with pytest.raises(ValueError):
+        enrich_table("p", "sales", "unregistered", "region", "should_fail")
