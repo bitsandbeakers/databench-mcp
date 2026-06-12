@@ -301,3 +301,35 @@ def test_add_rolling_invalid_col_identifier(project, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
     with pytest.raises(ValueError, match="col must be"):
         add_rolling("p", "sales", 're"venue', 2, "mean", "should_fail")
+
+
+def test_add_rolling_warns_without_time_col(project, monkeypatch):
+    import warnings
+    import databench_mcp.workspace as ws_inner
+    monkeypatch.setattr(ws_inner, "WORKSPACE_ROOT", project)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        add_rolling("p", "sales", "revenue", 2, "mean", "sales_rolled_warn")
+    assert any("time_col" in str(w.message) for w in caught)
+
+
+def test_add_rolling_values_not_all_null(project, monkeypatch):
+    import databench_mcp.workspace as ws_inner
+    monkeypatch.setattr(ws_inner, "WORKSPACE_ROOT", project)
+    add_rolling("p", "sales", "revenue", 1, "mean", "sales_rolled_vals")
+    from databench_mcp.workspace import project_path
+    db_path = project_path("p") / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        non_nulls = conn.execute("SELECT COUNT(*) FROM sales_rolled_vals WHERE revenue_rolling_1_mean IS NOT NULL").fetchone()[0]
+    # 3 of 4 source rows have non-null revenue; window=1 AVG preserves that pattern
+    assert non_nulls == 3
+
+
+def test_add_rolling_manifest_has_new_col(project, monkeypatch):
+    import databench_mcp.workspace as ws_inner
+    monkeypatch.setattr(ws_inner, "WORKSPACE_ROOT", project)
+    add_rolling("p", "sales", "revenue", 3, "std", "sales_rolled_nc")
+    from databench_mcp.workspace import read_manifest
+    manifest = read_manifest("p")
+    ds = manifest["datasets"]["sales_rolled_nc"]
+    assert ds["new_col"] == "revenue_rolling_3_std"

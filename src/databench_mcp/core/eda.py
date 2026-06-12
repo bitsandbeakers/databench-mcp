@@ -386,6 +386,7 @@ def add_rolling(
         "col": col,
         "window": window,
         "agg_fn": agg_fn,
+        "new_col": new_col,
         "profiled": False,
         "row_count": int(row_count),
     }
