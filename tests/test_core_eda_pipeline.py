@@ -61,3 +61,25 @@ def test_group_summary_empty_agg_cols(project, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
     with pytest.raises(ValueError, match="agg_cols must not be empty"):
         group_summary("p", "sales", "region", [])
+
+
+def test_group_summary_unproflied_table(tmp_path, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("up")
+    import duckdb
+    db_path = str(tmp_path / "up" / "project.duckdb")
+    conn = duckdb.connect(db_path)
+    conn.execute("CREATE TABLE x AS SELECT 1 AS a, 2 AS b")
+    conn.close()
+    # No profile entry in manifest — assert_profiled should raise
+    with pytest.raises(ValueError):
+        group_summary("up", "x", "a", ["b"])
+
+
+def test_group_summary_default_agg_fns_all_present(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    result = group_summary("p", "sales", "region", ["revenue"])
+    row_a = next(r for r in result["rows"] if r["region"] == "A")
+    # All 5 default aggregates should be present
+    for fn in ["mean", "count", "min", "max", "std"]:
+        assert f"revenue_{fn}" in row_a, f"missing revenue_{fn}"
