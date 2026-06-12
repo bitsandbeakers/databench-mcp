@@ -5,6 +5,7 @@ import datetime
 import decimal
 import math
 import re
+import warnings
 from typing import Any
 
 from databench_mcp.db import get_connection
@@ -269,11 +270,21 @@ def add_lag(
         raise ValueError(
             f"new_table_name must be a simple identifier (got {new_table_name!r})"
         )
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", col):
+        raise ValueError(f"col must be a simple identifier (got {col!r})")
+    if time_col is not None and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", time_col):
+        raise ValueError(f"time_col must be a simple identifier (got {time_col!r})")
     if not lags or not all(isinstance(n, int) and n > 0 for n in lags):
         raise ValueError("lags must be non-empty positive integers")
 
     assert_profiled(project, table)
 
+    if time_col is None:
+        warnings.warn(
+            "add_lag: time_col not specified — lag values will be in arbitrary row order",
+            UserWarning,
+            stacklevel=2,
+        )
     over_clause = f'ORDER BY "{time_col}"' if time_col is not None else ""
     lag_parts = ", ".join(
         f'LAG("{col}", {n}) OVER ({over_clause}) AS "{col}_lag_{n}"'

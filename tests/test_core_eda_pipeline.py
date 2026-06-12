@@ -229,3 +229,15 @@ def test_add_lag_invalid_lags_nonpositive(project, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
     with pytest.raises(ValueError, match="lags must be"):
         add_lag("p", "sales", "revenue", [0, 1], "should_fail")
+
+
+def test_add_lag_invalid_col_identifier(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="col must be"):
+        add_lag("p", "sales", 're"venue', [1], "should_fail")
+
+
+def test_add_lag_invalid_time_col_identifier(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="time_col must be"):
+        add_lag("p", "sales", "revenue", [1], "should_fail", time_col='u"nits')
