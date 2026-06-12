@@ -38,10 +38,13 @@ def _charts_dir(project: str) -> Path:
     return d
 
 
-def _save(fig, project: str, chart_type: str) -> str:
+def _save(fig, project: str, chart_type: str, params_dict: dict | None = None) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     path = _charts_dir(project) / f"{chart_type}_{ts}.html"
     fig.write_html(str(path))
+    if params_dict is not None:
+        sidecar = _charts_dir(project) / f"{chart_type}_{ts}_params.json"
+        sidecar.write_text(json.dumps(params_dict))
     return str(path)
 
 
@@ -318,5 +321,12 @@ def create_chart(
     else:
         raise ValueError(f"Unknown chart type '{chart_type}'")
 
-    path = _save(fig, project, chart_type)
+    params_dict = {
+        "chart_type": chart_type,
+        "table": table,
+        "columns": columns,
+        "finding_id": finding_id,
+        "params": params,
+    }
+    path = _save(fig, project, chart_type, params_dict)
     return {"chart_type": chart_type, "path": path, "title": fig.layout.title.text or chart_type}

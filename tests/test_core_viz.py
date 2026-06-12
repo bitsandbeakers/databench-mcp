@@ -55,3 +55,18 @@ def test_create_chart_requires_profiled(tmp_path, monkeypatch):
     ws.ensure_project("test-proj")
     with pytest.raises(ValueError, match="profiled"):
         create_chart("test-proj", "histogram", "providers", columns=["x"])
+
+
+def test_create_chart_saves_sidecar_json(project_with_data):
+    import json
+    from pathlib import Path
+    result = create_chart("test-proj", "scatter", "providers",
+                          columns=["claim_count", "total_drug_cost"])
+    html_path = Path(result["path"])
+    sidecar = html_path.parent / (html_path.stem + "_params.json")
+    assert sidecar.exists(), "sidecar params JSON should be saved alongside HTML"
+    data = json.loads(sidecar.read_text())
+    assert data["chart_type"] == "scatter"
+    assert data["table"] == "providers"
+    assert data["columns"] == ["claim_count", "total_drug_cost"]
+    assert data["finding_id"] is None
