@@ -40,7 +40,7 @@ def test_group_summary_basic(project, monkeypatch):
     result = group_summary("p", "sales", "region", ["revenue"])
     assert result["group_col"] == "region"
     assert result["row_count"] == 2
-    assert any("revenue_mean" in row for row in result["rows"])
+    assert "revenue_mean" in result["rows"][0]
 
 
 def test_group_summary_multiple_agg_fns(project, monkeypatch):
@@ -63,10 +63,9 @@ def test_group_summary_empty_agg_cols(project, monkeypatch):
         group_summary("p", "sales", "region", [])
 
 
-def test_group_summary_unproflied_table(tmp_path, monkeypatch):
+def test_group_summary_unprofiled_table(tmp_path, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
     ws.ensure_project("up")
-    import duckdb
     db_path = str(tmp_path / "up" / "project.duckdb")
     conn = duckdb.connect(db_path)
     conn.execute("CREATE TABLE x AS SELECT 1 AS a, 2 AS b")
