@@ -1,4 +1,4 @@
-"""Tests for core/recipes.py — reconstruct_recipe."""
+"""Tests for core/recipes.py — reconstruct_recipe and run_recipe."""
 from __future__ import annotations
 
 import importlib.util
@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 import databench_mcp.workspace as ws
-from databench_mcp.core.recipes import reconstruct_recipe
+from databench_mcp.core.recipes import reconstruct_recipe, run_recipe
 
 
 @pytest.fixture
@@ -93,3 +93,88 @@ def test_reconstruct_overwrites_existing(project_for_recipes):
     result2 = reconstruct_recipe("p")
     assert result2["warning"] is not None
     assert "overwritten" in result2["warning"]
+
+
+# ---------------------------------------------------------------------------
+# run_recipe tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_recipe_first_run_is_always_clean(project_for_recipes):
+    from databench_mcp.core.modeling import run_model
+    from databench_mcp.core.viz import create_chart
+    run_model("p", "data", "kmeans", features=["count", "score"])
+    create_chart("p", "scatter", "data", columns=["count", "score"])
+    reconstruct_recipe("p")
+
+    result = run_recipe("p")
+    assert result["status"] == "clean"
+    assert len(result["finding_ids"]) > 0
+    assert result["error"] is None
+
+
+def test_run_recipe_idempotent_clean(project_for_recipes):
+    from databench_mcp.core.modeling import run_model
+    from databench_mcp.core.viz import create_chart
+    run_model("p", "data", "kmeans", features=["count", "score"])
+    create_chart("p", "scatter", "data", columns=["count", "score"])
+    reconstruct_recipe("p")
+
+    run_recipe("p")           # first run: establishes baseline
+    result = run_recipe("p")  # second run: should still be clean (deterministic data)
+    assert result["status"] == "clean"
+    assert result["changes"] == []
+
+
+def test_run_recipe_detects_changed_metric(project_for_recipes):
+    from pathlib import Path
+    from databench_mcp.core.modeling import run_model
+    from databench_mcp.core.viz import create_chart
+    run_model("p", "data", "kmeans", features=["count", "score"])
+    create_chart("p", "scatter", "data", columns=["count", "score"])
+    reconstruct_recipe("p")
+    run_recipe("p")  # establish baseline
+
+    # Corrupt the expected inertia in recipe_meta.yaml
+    meta_path = Path(project_for_recipes) / "p" / "recipes" / "recipe_meta.yaml"
+    meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+    for step in meta["steps"]:
+        if step["kind"] == "run_model" and step.get("expected"):
+            if "inertia" in step["expected"].get("metrics", {}):
+                step["expected"]["metrics"]["inertia"] = -999.0
+    meta_path.write_text(yaml.dump(meta, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+
+    result = run_recipe("p")
+    assert result["status"] == "changed"
+    assert any(c["field"] == "inertia" for c in result["changes"])
+
+
+def test_run_recipe_no_diff_always_clean(project_for_recipes):
+    from pathlib import Path
+    from databench_mcp.core.modeling import run_model
+    from databench_mcp.core.viz import create_chart
+    run_model("p", "data", "kmeans", features=["count", "score"])
+    create_chart("p", "scatter", "data", columns=["count", "score"])
+    reconstruct_recipe("p")
+    run_recipe("p")  # establish baseline
+
+    # Corrupt expected just like the previous test
+    meta_path = Path(project_for_recipes) / "p" / "recipes" / "recipe_meta.yaml"
+    meta = yaml.safe_load(meta_path.read_text(encoding="utf-8"))
+    for step in meta["steps"]:
+        if step["kind"] == "run_model" and step.get("expected"):
+            if "inertia" in step["expected"].get("metrics", {}):
+                step["expected"]["metrics"]["inertia"] = -999.0
+    meta_path.write_text(yaml.dump(meta, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+
+    result = run_recipe("p", diff_mode=False)
+    assert result["status"] == "clean"   # diff skipped; expected updated unconditionally
+    assert result["changes"] == []
+
+
+def test_run_recipe_missing_recipe_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    from databench_mcp.core.project import create_project
+    create_project("q")
+    with pytest.raises(FileNotFoundError, match="reconstruct_recipe"):
+        run_recipe("q")
