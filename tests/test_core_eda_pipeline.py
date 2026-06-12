@@ -160,3 +160,19 @@ def test_clean_table_registers_manifest(project_nulls, monkeypatch):
     ds = manifest["datasets"]["clean_drop"]
     assert ds["source"] == "clean_table"
     assert ds["source_table"] == "readings"
+    assert ds["strategy"] == "drop_rows"
+
+
+def test_clean_table_drop_cols_raises_when_all_dropped(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    project_name = "q"
+    table = "readings"
+    # get all columns from the table
+    db_path = project_nulls / project_name / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        result = conn.execute(
+            f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table}'"
+        ).fetchall()
+    all_cols = [row[0] for row in result]
+    with pytest.raises(ValueError, match="strategy would drop all columns"):
+        clean_table(project_name, table, "drop_cols", "shouldfail", columns=all_cols)
