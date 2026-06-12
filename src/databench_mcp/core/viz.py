@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from databench_mcp.core.findings import get_finding
 from databench_mcp.core.modeling import _build_network_graph
@@ -29,6 +30,20 @@ _CHART_TYPES = {
     "shap_waterfall",
     "partial_dependence",
     "network_graph",
+    "line",
+    "bar",
+    "horizontal_bar",
+    "pie",
+    "bubble",
+}
+
+# Maps chart_type to make_subplots cell type
+_SUBPLOT_TYPE: dict[str, str] = {
+    "histogram": "xy", "boxplot": "xy", "scatter": "xy", "scatter_matrix": "xy",
+    "correlation_heatmap": "xy", "line": "xy", "bar": "xy", "horizontal_bar": "xy",
+    "bubble": "xy", "network_graph": "xy", "feature_importance_bar": "xy",
+    "cluster_scatter": "xy", "shap_beeswarm": "xy",
+    "pie": "pie",
 }
 
 
@@ -75,50 +90,71 @@ def _extract_filter_nodes(finding: dict, source_col: str) -> list[str]:
         )
 
 
-def create_chart(
-    project: str,
+def _render_figure(
     chart_type: str,
-    table: str,
+    df: pd.DataFrame,
     columns: list[str],
+    params: dict,
     finding_id: str | None = None,
-    params: dict | None = None,
-) -> dict[str, Any]:
-    """Generate a Plotly chart and save as standalone HTML."""
-    assert_profiled(project, table)
-    params = params or {}
-
-    if chart_type not in _CHART_TYPES:
-        raise ValueError(f"Unknown chart type '{chart_type}'. Available: {sorted(_CHART_TYPES)}")
-
+    project: str | None = None,
+) -> go.Figure:
+    """Render a Plotly Figure from a pre-loaded DataFrame."""
     if chart_type == "histogram":
         col = columns[0]
-        df = _load_df(project, table, [col])
-        fig = px.histogram(df, x=col, title=f"Distribution of {col}")
+        return px.histogram(df, x=col, title=f"Distribution of {col}")
 
     elif chart_type == "boxplot":
         col = columns[0]
-        df = _load_df(project, table, [col])
-        fig = px.box(df, y=col, title=f"Box plot: {col}")
+        return px.box(df, y=col, title=f"Box plot: {col}")
 
     elif chart_type == "scatter":
         x_col, y_col = columns[0], columns[1]
-        df = _load_df(project, table, [x_col, y_col])
         color_col = params.get("color")
-        fig = px.scatter(df, x=x_col, y=y_col, color=color_col,
-                         title=f"{x_col} vs {y_col}")
+        return px.scatter(df, x=x_col, y=y_col, color=color_col,
+                          title=f"{x_col} vs {y_col}")
 
     elif chart_type == "scatter_matrix":
-        df = _load_df(project, table, columns)
-        fig = px.scatter_matrix(df, dimensions=columns,
-                                title="Scatter matrix: " + ", ".join(columns))
+        return px.scatter_matrix(df, dimensions=columns,
+                                 title="Scatter matrix: " + ", ".join(columns))
 
     elif chart_type == "correlation_heatmap":
-        df = _load_df(project, table, columns if columns else None)
         numeric_df = df.select_dtypes(include="number")
         corr = numeric_df.corr()
-        fig = px.imshow(corr, text_auto=True, aspect="auto",
-                        title="Correlation heatmap", color_continuous_scale="RdBu_r",
-                        zmin=-1, zmax=1)
+        return px.imshow(corr, text_auto=True, aspect="auto",
+                         title="Correlation heatmap", color_continuous_scale="RdBu_r",
+                         zmin=-1, zmax=1)
+
+    elif chart_type == "line":
+        x_col, y_col = columns[0], columns[1]
+        return px.line(df, x=x_col, y=y_col, color=params.get("color"),
+                       title=f"{y_col} over {x_col}")
+
+    elif chart_type == "bar":
+        x_col, y_col = columns[0], columns[1]
+        return px.bar(df, x=x_col, y=y_col, color=params.get("color"),
+                      barmode=params.get("barmode", "relative"),
+                      title=f"{y_col} by {x_col}")
+
+    elif chart_type == "horizontal_bar":
+        cat_col, val_col = columns[0], columns[1]
+        return px.bar(df, x=val_col, y=cat_col, color=params.get("color"),
+                      barmode=params.get("barmode", "relative"),
+                      orientation="h", title=f"{val_col} by {cat_col}")
+
+    elif chart_type == "pie":
+        names_col, values_col = columns[0], columns[1]
+        hole = float(params.get("hole", 0))
+        return px.pie(df, names=names_col, values=values_col, hole=hole,
+                      title=f"{values_col} by {names_col}")
+
+    elif chart_type == "bubble":
+        x_col, y_col = columns[0], columns[1]
+        size_col = params.get("size_col")
+        if size_col and size_col not in df.columns:
+            raise ValueError(f"size_col '{size_col}' not found in DataFrame")
+        return px.scatter(df, x=x_col, y=y_col, size=size_col,
+                          color=params.get("color"),
+                          title=f"{x_col} vs {y_col}" + (f" (size: {size_col})" if size_col else ""))
 
     elif chart_type == "feature_importance_bar":
         finding = get_finding(project, finding_id)
@@ -134,8 +170,8 @@ def create_chart(
             sorted(importance.items(), key=lambda x: x[1], reverse=True),
             columns=["feature", "importance"],
         )
-        fig = px.bar(feat_df, x="importance", y="feature", orientation="h",
-                     title=f"Feature importance — {finding['method']}")
+        return px.bar(feat_df, x="importance", y="feature", orientation="h",
+                      title=f"Feature importance — {finding['method']}")
 
     elif chart_type == "cluster_scatter":
         if finding_id is None:
@@ -147,10 +183,10 @@ def create_chart(
             raise ValueError(f"No cluster labels found for finding '{finding_id}'")
         labels = np.load(str(labels_path))
         x_col, y_col = columns[0], columns[1]
-        df = _load_df(project, table, [x_col, y_col])
+        df = df.copy()
         df["cluster"] = labels.astype(str)
-        fig = px.scatter(df, x=x_col, y=y_col, color="cluster",
-                         title=f"Cluster scatter: {x_col} vs {y_col}")
+        return px.scatter(df, x=x_col, y=y_col, color="cluster",
+                          title=f"Cluster scatter: {x_col} vs {y_col}")
 
     elif chart_type == "shap_beeswarm":
         if finding_id is None:
@@ -167,8 +203,8 @@ def create_chart(
             "mean_abs_shap": shap_vals.mean(axis=0) if shap_vals.ndim == 2
                              else [float(shap_vals.mean())],
         }).sort_values("mean_abs_shap", ascending=True)
-        fig = px.bar(mean_abs, x="mean_abs_shap", y="feature", orientation="h",
-                     title="SHAP mean absolute values (beeswarm proxy)")
+        return px.bar(mean_abs, x="mean_abs_shap", y="feature", orientation="h",
+                      title="SHAP mean absolute values (beeswarm proxy)")
 
     elif chart_type == "shap_waterfall":
         raise ValueError("shap_waterfall chart type is not yet implemented")
@@ -187,12 +223,9 @@ def create_chart(
         layout_name = params.get("layout", "spring")
         filter_finding_id = params.get("filter_finding_id")
 
-        df = _load_df(project, table, None)
-
         if weight_col and weight_col not in df.columns:
-            raise ValueError(f"weight_col '{weight_col}' not found in table '{table}'")
+            raise ValueError(f"weight_col '{weight_col}' not found in table")
 
-        # Use shared graph builder from modeling to ensure community-index alignment
         G = _build_network_graph(df, source_col, target_col_name, weight_col)
 
         original_count = G.vcount()
@@ -214,7 +247,6 @@ def create_chart(
         ys = [layout_coords[i][1] for i in range(G.vcount())]
 
         if color_by and color_by in df.columns:
-            # Restrict to subgraph nodes to avoid pruned-node contribution to mean
             subgraph_node_set = set(names)
             color_series = (
                 df[df[source_col].astype(str).isin(subgraph_node_set)]
@@ -307,7 +339,7 @@ def create_chart(
                     x=0.01, xanchor="left", y=1.15, yanchor="top",
                 )],
             )
-            fig = go.Figure(data=[edge_trace] + node_traces, layout=base_layout)
+            return go.Figure(data=[edge_trace] + node_traces, layout=base_layout)
         else:
             node_trace = go.Scatter(
                 x=xs, y=ys, mode="markers",
@@ -316,10 +348,37 @@ def create_chart(
                 text=names, hoverinfo="text",
             )
             base_layout.update(showlegend=False)
-            fig = go.Figure(data=[edge_trace, node_trace], layout=base_layout)
+            return go.Figure(data=[edge_trace, node_trace], layout=base_layout)
 
+    raise ValueError(f"Unknown chart type '{chart_type}'. Available: {sorted(_CHART_TYPES)}")
+
+
+def create_chart(
+    project: str,
+    chart_type: str,
+    table: str,
+    columns: list[str],
+    finding_id: str | None = None,
+    params: dict | None = None,
+) -> dict[str, Any]:
+    """Generate a Plotly chart and save as standalone HTML."""
+    assert_profiled(project, table)
+    params = params or {}
+
+    if chart_type not in _CHART_TYPES:
+        raise ValueError(f"Unknown chart type '{chart_type}'. Available: {sorted(_CHART_TYPES)}")
+
+    # Determine which columns to load from DB
+    if chart_type == "network_graph":
+        df = _load_df(project, table, None)
+    elif chart_type == "bubble" and params.get("size_col"):
+        df = _load_df(project, table, list(columns) + [params["size_col"]])
+    elif not columns or chart_type == "correlation_heatmap":
+        df = _load_df(project, table, None)
     else:
-        raise ValueError(f"Unknown chart type '{chart_type}'")
+        df = _load_df(project, table, columns)
+
+    fig = _render_figure(chart_type, df, columns, params, finding_id, project)
 
     params_dict = {
         "chart_type": chart_type,

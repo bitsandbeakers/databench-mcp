@@ -71,3 +71,44 @@ def test_create_chart_saves_sidecar_json(project_with_data):
     assert data["columns"] == ["claim_count", "total_drug_cost"]
     assert data["finding_id"] is None
     assert "params" in data
+
+
+def test_create_chart_line(project_with_data):
+    result = create_chart("test-proj", "line", "providers",
+                          columns=["claim_count", "total_drug_cost"])
+    assert result["chart_type"] == "line"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_bar(project_with_data):
+    result = create_chart("test-proj", "bar", "providers",
+                          columns=["specialty", "total_drug_cost"])
+    assert result["chart_type"] == "bar"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_horizontal_bar(project_with_data):
+    result = create_chart("test-proj", "horizontal_bar", "providers",
+                          columns=["specialty", "total_drug_cost"])
+    assert result["chart_type"] == "horizontal_bar"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_pie(project_with_data):
+    result = create_chart("test-proj", "pie", "providers",
+                          columns=["specialty", "total_drug_cost"])
+    assert result["chart_type"] == "pie"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_bubble(project_with_data):
+    result = create_chart("test-proj", "bubble", "providers",
+                          columns=["claim_count", "total_drug_cost"],
+                          params={"size_col": "claim_count"})
+    assert result["chart_type"] == "bubble"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
