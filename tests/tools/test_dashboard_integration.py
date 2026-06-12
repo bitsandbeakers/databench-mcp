@@ -34,7 +34,6 @@ def pipeline_project(tmp_path, monkeypatch):
 
 def test_build_dashboard_tool_files(pipeline_project):
     from databench_mcp.tools.dashboard import build_dashboard
-    from databench_mcp.workspace import project_path
 
     result = build_dashboard(pipeline_project)
 
