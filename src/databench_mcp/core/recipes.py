@@ -231,6 +231,18 @@ def run_recipe(project: str, diff_mode: bool = True) -> dict[str, Any]:
             "error": None,
         }
 
+    if len(new_findings) != len(run_model_steps):
+        return {
+            "status": "error",
+            "steps_run": len(steps),
+            "changes": [],
+            "finding_ids": new_finding_ids,
+            "error": (
+                f"finding count mismatch: expected {len(run_model_steps)} "
+                f"model step(s), got {len(new_findings)}"
+            ),
+        }
+
     changes: list[dict] = []
     for step_idx, (step, finding) in enumerate(zip(run_model_steps, new_findings)):
         expected_metrics = (step.get("expected") or {}).get("metrics", {})
