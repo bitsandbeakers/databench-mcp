@@ -112,3 +112,59 @@ def test_create_chart_bubble(project_with_data):
     assert result["chart_type"] == "bubble"
     from pathlib import Path
     assert Path(result["path"]).exists()
+
+
+def test_create_chart_dot(project_with_data):
+    result = create_chart("test-proj", "dot", "providers",
+                          columns=["specialty", "total_drug_cost"])
+    assert result["chart_type"] == "dot"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_table(project_with_data):
+    result = create_chart("test-proj", "table", "providers",
+                          columns=["specialty", "total_drug_cost"])
+    assert result["chart_type"] == "table"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_dumbbell(project_with_data):
+    result = create_chart("test-proj", "dumbbell", "providers",
+                          columns=["specialty", "total_drug_cost", "claim_count"])
+    assert result["chart_type"] == "dumbbell"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_parallel_categories(project_with_data):
+    result = create_chart("test-proj", "parallel_categories", "providers",
+                          columns=["specialty", "state"])
+    assert result["chart_type"] == "parallel_categories"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
+
+
+def test_create_chart_choropleth_map(project_with_data):
+    import duckdb
+    db_path = str(project_with_data / "test-proj" / "project.duckdb")
+    conn = duckdb.connect(db_path)
+    conn.execute(
+        "CREATE TABLE state_totals AS "
+        "SELECT state, AVG(total_drug_cost) AS avg_cost "
+        "FROM providers GROUP BY state"
+    )
+    conn.close()
+    manifest = ws.read_manifest("test-proj")
+    manifest["datasets"]["state_totals"] = {
+        "row_count": 4, "col_count": 2, "profiled": True,
+        "profile": {"state": {"type": "VARCHAR"}, "avg_cost": {"type": "DOUBLE"}},
+    }
+    ws.write_manifest("test-proj", manifest)
+    result = create_chart("test-proj", "choropleth_map", "state_totals",
+                          columns=["state", "avg_cost"],
+                          params={"locations_format": "usa-states", "scope": "usa"})
+    assert result["chart_type"] == "choropleth_map"
+    from pathlib import Path
+    assert Path(result["path"]).exists()
