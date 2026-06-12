@@ -252,6 +252,61 @@ def clean_table(
     }
 
 
+def add_lag(
+    project: str,
+    table: str,
+    col: str,
+    lags: list[int],
+    new_table_name: str,
+    time_col: str | None = None,
+) -> dict:
+    """Materialise a new table with LAG columns appended for each lag value in *lags*."""
+    from databench_mcp.workspace import assert_profiled
+
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
+        raise ValueError(f"table must be a simple identifier (got {table!r})")
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", new_table_name):
+        raise ValueError(
+            f"new_table_name must be a simple identifier (got {new_table_name!r})"
+        )
+    if not lags or not all(isinstance(n, int) and n > 0 for n in lags):
+        raise ValueError("lags must be non-empty positive integers")
+
+    assert_profiled(project, table)
+
+    over_clause = f'ORDER BY "{time_col}"' if time_col is not None else ""
+    lag_parts = ", ".join(
+        f'LAG("{col}", {n}) OVER ({over_clause}) AS "{col}_lag_{n}"'
+        for n in lags
+    )
+    body = f'SELECT *, {lag_parts} FROM "{table}"'
+    sql = f'CREATE OR REPLACE TABLE "{new_table_name}" AS ({body})'
+
+    with get_connection(project) as conn:
+        conn.execute(sql)
+        row_count = conn.execute(
+            f'SELECT COUNT(*) FROM "{new_table_name}"'
+        ).fetchone()[0]
+
+    manifest = read_manifest(project)
+    manifest["datasets"][new_table_name] = {
+        "source": "add_lag",
+        "source_table": table,
+        "col": col,
+        "lags": lags,
+        "profiled": False,
+        "row_count": int(row_count),
+    }
+    write_manifest(project, manifest)
+
+    return {
+        "table": new_table_name,
+        "source_table": table,
+        "new_cols": [f"{col}_lag_{n}" for n in lags],
+        "rows": int(row_count),
+    }
+
+
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
     stripped = sql.strip().rstrip(";")

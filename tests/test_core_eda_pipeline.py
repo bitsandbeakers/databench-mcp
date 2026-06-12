@@ -5,7 +5,7 @@ import duckdb
 import pytest
 
 import databench_mcp.workspace as ws
-from databench_mcp.core.eda import group_summary, clean_table
+from databench_mcp.core.eda import group_summary, clean_table, add_lag
 
 
 @pytest.fixture
@@ -176,3 +176,56 @@ def test_clean_table_drop_cols_raises_when_all_dropped(project_nulls, monkeypatc
     all_cols = [row[0] for row in result]
     with pytest.raises(ValueError, match="strategy would drop all columns"):
         clean_table(project_name, table, "drop_cols", "shouldfail", columns=all_cols)
+
+
+# --- add_lag tests ---
+
+def test_add_lag_basic(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    result = add_lag("p", "sales", "revenue", [1, 3], "sales_lagged")
+    assert result["table"] == "sales_lagged"
+    assert result["source_table"] == "sales"
+    assert result["rows"] == 4
+    assert "revenue_lag_1" in result["new_cols"]
+    assert "revenue_lag_3" in result["new_cols"]
+
+
+def test_add_lag_columns_present_in_db(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    add_lag("p", "sales", "revenue", [2], "sales_lagged2")
+    db_path = project / "p" / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        cols = [r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'sales_lagged2'"
+        ).fetchall()]
+    assert "revenue_lag_2" in cols
+    assert "revenue" in cols
+
+
+def test_add_lag_with_time_col(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    result = add_lag("p", "sales", "revenue", [1], "sales_lagged_tc", time_col="units")
+    assert result["rows"] == 4
+
+
+def test_add_lag_registers_manifest(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    add_lag("p", "sales", "revenue", [1, 2], "sales_lagged_m")
+    manifest = ws.read_manifest("p")
+    ds = manifest["datasets"]["sales_lagged_m"]
+    assert ds["source"] == "add_lag"
+    assert ds["source_table"] == "sales"
+    assert ds["col"] == "revenue"
+    assert ds["lags"] == [1, 2]
+
+
+def test_add_lag_invalid_lags_empty(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="lags must be"):
+        add_lag("p", "sales", "revenue", [], "should_fail")
+
+
+def test_add_lag_invalid_lags_nonpositive(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="lags must be"):
+        add_lag("p", "sales", "revenue", [0, 1], "should_fail")
