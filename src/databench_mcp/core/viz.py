@@ -1,6 +1,8 @@
 """Chart generation — Plotly HTML saved to workspace/<project>/charts/."""
 from __future__ import annotations
 
+import json
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from databench_mcp.core.findings import get_finding
+from databench_mcp.core.modeling import _build_network_graph
 from databench_mcp.db import get_connection
 from databench_mcp.workspace import assert_profiled, project_path
 
@@ -171,10 +174,6 @@ def create_chart(
         raise ValueError(f"Chart type '{chart_type}' not yet implemented")
 
     elif chart_type == "network_graph":
-        import igraph as ig
-        import json as _json
-        from collections import defaultdict
-
         source_col = params.get("source_col", columns[0] if columns else None)
         target_col_name = params.get("target_col", columns[1] if len(columns) > 1 else None)
         if not source_col or not target_col_name:
@@ -187,13 +186,11 @@ def create_chart(
 
         df = _load_df(project, table, None)
 
-        src = df[source_col].astype(str).tolist()
-        tgt = df[target_col_name].astype(str).tolist()
-        if weight_col:
-            tuples = list(zip(src, tgt, df[weight_col].tolist()))
-            G = ig.Graph.TupleList(tuples, directed=False, weights=True)
-        else:
-            G = ig.Graph.TupleList(list(zip(src, tgt)), directed=False, weights=False)
+        if weight_col and weight_col not in df.columns:
+            raise ValueError(f"weight_col '{weight_col}' not found in table '{table}'")
+
+        # Use shared graph builder from modeling to ensure community-index alignment
+        G = _build_network_graph(df, source_col, target_col_name, weight_col)
 
         original_count = G.vcount()
         if G.vcount() > max_nodes:
@@ -214,17 +211,23 @@ def create_chart(
         ys = [layout_coords[i][1] for i in range(G.vcount())]
 
         if color_by and color_by in df.columns:
-            color_series = df.groupby(source_col)[color_by].mean()
+            # Restrict to subgraph nodes to avoid pruned-node contribution to mean
+            subgraph_node_set = set(names)
+            color_series = (
+                df[df[source_col].astype(str).isin(subgraph_node_set)]
+                .groupby(source_col)[color_by]
+                .mean()
+            )
             color_vals = [float(color_series.get(name, 0.0)) for name in names]
         else:
             color_vals = [float(d) for d in G.degree()]
 
-        edge_x: list = []
-        edge_y: list = []
+        edge_x: list[float | None] = []
+        edge_y: list[float | None] = []
         for edge in G.es:
             s, t = edge.source, edge.target
-            edge_x += [xs[s], xs[t], None]
-            edge_y += [ys[s], ys[t], None]
+            edge_x.extend([xs[s], xs[t], None])
+            edge_y.extend([ys[s], ys[t], None])
 
         edge_trace = go.Scatter(
             x=edge_x, y=edge_y, mode="lines",
@@ -249,7 +252,7 @@ def create_chart(
                     f"no community data for finding '{finding_id}'; "
                     f"run run_model(method='network_communities') first"
                 )
-            all_communities = _json.loads(comm_path.read_text())
+            all_communities = json.loads(comm_path.read_text())
             node_comm = {name: all_communities.get(name, -1) for name in names}
 
             if filter_finding_id:
@@ -259,7 +262,7 @@ def create_chart(
             else:
                 visible_comms = set(node_comm.values())
 
-            comm_to_idxs: dict = defaultdict(list)
+            comm_to_idxs: dict[int, list[int]] = defaultdict(list)
             for i, name in enumerate(names):
                 comm_to_idxs[node_comm[name]].append(i)
 

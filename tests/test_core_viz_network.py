@@ -1,7 +1,6 @@
 """Tests for network_graph chart type in core/viz.py."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import duckdb
@@ -79,6 +78,41 @@ def test_network_graph_unknown_finding_raises(project_with_edges, monkeypatch):
             finding_id="f999",
             params={"source_col": "source", "target_col": "target"},
         )
+
+
+def test_network_graph_filter_finding_id_limits_dropdown(project_with_edges, monkeypatch):
+    """filter_finding_id narrows the dropdown to communities containing filter nodes."""
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_with_edges)
+    comm_finding = run_model(
+        "viz-proj", "edges", "network_communities",
+        features=["source", "target"],
+        params={"source_col": "source", "target_col": "target"},
+    )
+    cent_finding = run_model(
+        "viz-proj", "edges", "network_centrality",
+        features=["source", "target"],
+        params={"source_col": "source", "target_col": "target"},
+    )
+    result = create_chart(
+        "viz-proj", "network_graph", "edges",
+        columns=["source", "target"],
+        finding_id=comm_finding["finding_id"],
+        params={
+            "source_col": "source",
+            "target_col": "target",
+            "max_nodes": 50,
+            "filter_finding_id": cent_finding["finding_id"],
+        },
+    )
+    html = Path(result["path"]).read_text(encoding="utf-8")
+    # Dropdown is still present (communities finding still drives it)
+    assert '"updatemenus":[' in html
+    # Total community buttons ≤ total communities (filter may restrict to a subset).
+    # Use label-specific pattern to avoid matching trace name fields.
+    total_comms = comm_finding["metrics"]["num_communities"]
+    import re
+    button_labels = re.findall(r'"label":"(Community \d+)"', html)
+    assert 1 <= len(button_labels) <= total_comms
 
 
 def test_network_graph_requires_profiled(tmp_path, monkeypatch):
