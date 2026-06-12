@@ -79,9 +79,7 @@ def test_build_dashboard_charts_embedded(two_chart_project):
 def test_build_dashboard_overwrites_existing(two_chart_project):
     from databench_mcp.core.dashboard import build_dashboard
     result1 = build_dashboard(two_chart_project)
-    # two_chart_project has only raw-ingested tables, so the fallback warning fires
-    # but no "overwritten" warning yet on the first run
-    assert result1["warning"] is None or "overwritten" not in result1["warning"].lower()
+    assert result1["warning"] == "no derived tables found — showing all tables"
     result2 = build_dashboard(two_chart_project)
     assert result2["warning"] is not None
     assert "overwritten" in result2["warning"].lower()
