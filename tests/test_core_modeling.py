@@ -210,3 +210,13 @@ def test_run_model_requires_profiled(tmp_path, monkeypatch):
     ws.ensure_project("test-proj")
     with pytest.raises(ValueError, match="profiled"):
         run_model("test-proj", "providers", "linear_regression", target="total_drug_cost")
+
+
+def test_run_model_stores_table_and_params(project_with_data):
+    from databench_mcp.core.findings import get_finding
+    result = run_model("test-proj", "providers", "kmeans",
+                       features=["claim_count", "total_drug_cost"])
+    finding = get_finding("test-proj", result["finding_id"])
+    assert finding["table"] == "providers"
+    assert "params" in finding
+    assert isinstance(finding["params"], dict)

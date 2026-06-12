@@ -675,8 +675,10 @@ def run_model(
 
     finding = add_finding(project, {
         "method": method,
+        "table": table,
         "target": target,
         "features": resolved_features,
+        "params": params or {},
         "metrics": result["metrics"],
         "explainability": result["explainability"],
         "summary": result["summary"],
