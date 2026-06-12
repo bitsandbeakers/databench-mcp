@@ -87,3 +87,8 @@ def test_assert_profiled_raises_for_unknown_table(tmp_path):
     ws.ensure_project("test-proj")
     with pytest.raises(ValueError, match="not in manifest"):
         ws.assert_profiled("test-proj", "ghost_table")
+
+
+def test_ensure_project_creates_dashboards_dir(tmp_path):
+    ws.ensure_project("test-proj")
+    assert (tmp_path / "test-proj" / "dashboards").is_dir()

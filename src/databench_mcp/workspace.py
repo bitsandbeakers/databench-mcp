@@ -13,7 +13,7 @@ from pathlib import Path
 
 WORKSPACE_ROOT = Path(os.environ.get("DATABENCH_WORKSPACE", "./workspace"))
 
-_SUBDIRS = ("raw", "artifacts", "recipes", "reports")
+_SUBDIRS = ("raw", "artifacts", "recipes", "reports", "dashboards")
 
 
 def _validate_name(name: str) -> None:
