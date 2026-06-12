@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,13 +38,13 @@ def _fetch_filter_options(
     result: dict[str, dict[str, list]] = {}
     for table, cols in filterable.items():
         result[table] = {}
-        for col in cols:
-            with get_connection(project) as conn:
+        with get_connection(project) as conn:
+            for col in cols:
                 rows = conn.execute(
                     f'SELECT DISTINCT "{col}" FROM "{table}" '
                     f'WHERE "{col}" IS NOT NULL ORDER BY "{col}"'
                 ).fetchall()
-            result[table][col] = [r[0] for r in rows]
+                result[table][col] = [r[0] for r in rows]
     return result
 
 
@@ -329,10 +330,11 @@ def _generate_dashboard_py(
 
     # Static charts for non-filterable tables
     if filterable_tables:
+        _set_literal = "{" + ", ".join(repr(t) for t in filterable_tables) + "}"
         static_loop = (
             "_tabs_by_table = {}\n"
             "for _c in _CHARTS:\n"
-            "    if _c[\"table\"] not in " + repr(set(filterable_tables)) + ":\n"
+            "    if _c[\"table\"] not in " + _set_literal + ":\n"
             "        _fig = _make_figure(_c[\"chart_type\"], tables[_c[\"table\"]],"
             " _c[\"columns\"], _c.get(\"params\", {}))\n"
             "        _tabs_by_table.setdefault(_c[\"table\"], []).append("
@@ -386,6 +388,7 @@ def _generate_dashboard_py(
     # Callbacks for filterable tables
     callbacks = ""
     for _tbl in filterable_tables:
+        _fn_safe = re.sub(r"[^A-Za-z0-9_]", "_", _tbl)
         _cols = filterable[_tbl]
         _param_names = [f"_v{i}" for i in range(len(_cols))]
         _inputs_str = ", ".join(
@@ -395,7 +398,7 @@ def _generate_dashboard_py(
         _vals_list = "[" + ", ".join(_param_names) + "]"
         callbacks += (
             f"@app.callback(Output(\"charts-{_tbl}\", \"children\"), [{_inputs_str}])\n"
-            f"def update_{_tbl}_charts({_params_str}):\n"
+            f"def update_{_fn_safe}_charts({_params_str}):\n"
             f"    _df = tables[\"{_tbl}\"].copy()\n"
             f"    for _col, _val in zip({_cols!r}, {_vals_list}):\n"
             f"        if _val:\n"
