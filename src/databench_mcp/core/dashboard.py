@@ -7,8 +7,10 @@ from typing import Any
 
 from databench_mcp.core.findings import _read_findings as _load_findings
 from databench_mcp.db import get_connection
-from databench_mcp.workspace import project_path
+from databench_mcp.workspace import project_path, read_manifest
 
+
+_DERIVED_SOURCES = {"derived", "clean_table", "add_lag", "add_rolling", "enrich_table"}
 
 _REQUIREMENTS = (
     "dash==2.17.1\n"
@@ -327,8 +329,25 @@ def build_dashboard(project: str) -> dict[str, Any]:
     """Generate a standalone Dash app from the project's chart artifacts and findings."""
     sidecars_by_table, skipped = _read_sidecars(project)
 
+    warning_parts: list[str] = []
+
     if not sidecars_by_table:
         raise ValueError("no charts to embed — run create_chart first")
+
+    # Filter to derived tables only; fall back to all if no derived tables have charts
+    manifest = read_manifest(project)
+
+    def _is_derived(table: str) -> bool:
+        ds = manifest.get("datasets", {}).get(table, {})
+        return ds.get("source", "") in _DERIVED_SOURCES
+
+    derived_tables_with_charts = {t for t in sidecars_by_table if _is_derived(t)}
+
+    if derived_tables_with_charts:
+        sidecars_by_table = {t: v for t, v in sidecars_by_table.items()
+                             if t in derived_tables_with_charts}
+    else:
+        warning_parts.append("no derived tables found — showing all tables")
 
     dash_dir = _dashboards_dir(project)
     data_dir = dash_dir / "data"
@@ -340,7 +359,6 @@ def build_dashboard(project: str) -> dict[str, Any]:
     findings = _load_findings(project)
     dashboard_py_path = dash_dir / "dashboard.py"
 
-    warning_parts: list[str] = []
     if dashboard_py_path.exists():
         warning_parts.append("dashboard.py already existed and was overwritten")
 

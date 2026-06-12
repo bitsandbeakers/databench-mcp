@@ -79,7 +79,94 @@ def test_build_dashboard_charts_embedded(two_chart_project):
 def test_build_dashboard_overwrites_existing(two_chart_project):
     from databench_mcp.core.dashboard import build_dashboard
     result1 = build_dashboard(two_chart_project)
-    assert result1["warning"] is None
+    # two_chart_project has only raw-ingested tables, so the fallback warning fires
+    # but no "overwritten" warning yet on the first run
+    assert result1["warning"] is None or "overwritten" not in result1["warning"].lower()
     result2 = build_dashboard(two_chart_project)
     assert result2["warning"] is not None
     assert "overwritten" in result2["warning"].lower()
+
+
+@pytest.fixture
+def mixed_project(tmp_path, monkeypatch):
+    """Project with both a raw table (items) and a derived table (items_clean),
+    each with a chart sidecar."""
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    from databench_mcp.tools.project import project_create
+    from databench_mcp.tools.ingest import ingest_file
+    from databench_mcp.workspace import project_path as _pp, read_manifest, write_manifest
+    project_create("dash-proj")
+    charts_dir = _pp("dash-proj") / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    # Ingest a raw table
+    csv_path = tmp_path / "items.csv"
+    csv_path.write_text("name,value\nAlice,10\nBob,20\n")
+    ingest_file("dash-proj", str(csv_path), table_name="items")
+    # Manually register a derived table (simulates clean_table output)
+    import duckdb
+    db_path = _pp("dash-proj") / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        conn.execute("CREATE OR REPLACE TABLE items_clean AS SELECT * FROM items")
+    manifest = read_manifest("dash-proj")
+    manifest["datasets"]["items_clean"] = {
+        "source": "clean_table",
+        "source_table": "items",
+        "strategy": "fill_mean",
+        "profiled": False,
+        "row_count": 2,
+    }
+    write_manifest("dash-proj", manifest)
+    # Chart sidecars for both tables
+    for tbl, col, ct in [
+        ("items", "value", "histogram"),
+        ("items_clean", "value", "boxplot"),
+    ]:
+        (charts_dir / f"{ct}_{tbl}_params.json").write_text(
+            json.dumps({"chart_type": ct, "table": tbl, "columns": [col],
+                        "finding_id": None, "params": {}})
+        )
+    return "dash-proj"
+
+
+def test_build_dashboard_derived_only(mixed_project):
+    """Dashboard includes only derived tables when derived tables have charts."""
+    from databench_mcp.core.dashboard import build_dashboard
+    result = build_dashboard(mixed_project)
+    assert "items_clean" in result["tables_exported"]
+    assert "items" not in result["tables_exported"]
+
+
+def test_build_dashboard_derived_only_tab_count(mixed_project):
+    """Derived-only filter reduces tab count to 1 (only items_clean)."""
+    from databench_mcp.core.dashboard import build_dashboard
+    result = build_dashboard(mixed_project)
+    assert result["tabs"] == 1
+
+
+@pytest.fixture
+def raw_only_project(tmp_path, monkeypatch):
+    """Project with only raw tables (no derived tables have charts) — fallback mode."""
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    from databench_mcp.tools.project import project_create
+    from databench_mcp.tools.ingest import ingest_file
+    from databench_mcp.workspace import project_path as _pp
+    project_create("dash-proj")
+    charts_dir = _pp("dash-proj") / "charts"
+    charts_dir.mkdir(exist_ok=True)
+    csv_path = tmp_path / "items.csv"
+    csv_path.write_text("name,value\nAlice,10\nBob,20\n")
+    ingest_file("dash-proj", str(csv_path), table_name="items")
+    (charts_dir / "histogram_items_params.json").write_text(
+        json.dumps({"chart_type": "histogram", "table": "items", "columns": ["value"],
+                    "finding_id": None, "params": {}})
+    )
+    return "dash-proj"
+
+
+def test_build_dashboard_fallback_all_tables(raw_only_project):
+    """Fallback: when only raw tables have charts, all tables shown with warning."""
+    from databench_mcp.core.dashboard import build_dashboard
+    result = build_dashboard(raw_only_project)
+    assert "items" in result["tables_exported"]
+    assert result["warning"] is not None
+    assert "no derived tables" in result["warning"]
