@@ -12,7 +12,7 @@ from fastmcp import FastMCP
 
 from databench_mcp import __version__
 from databench_mcp.tools.analysis import analyze_correlations, analyze_distribution, detect_outliers
-from databench_mcp.tools.eda import eda_summary, sql_query
+from databench_mcp.tools.eda import derive_table, eda_summary, sql_query
 from databench_mcp.tools.hypothesis import hypothesis_add, hypothesis_list, hypothesis_update
 from databench_mcp.tools.ingest import ingest_file, ingest_url
 from databench_mcp.tools.modeling import list_findings, run_model
@@ -23,7 +23,7 @@ from databench_mcp.tools.viz import create_chart
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 18
+EXPECTED_TOOL_COUNT = 19
 
 
 async def ping() -> dict[str, Any]:
@@ -40,6 +40,7 @@ mcp.tool(ingest_url)
 mcp.tool(profile_table)
 mcp.tool(sql_query)
 mcp.tool(eda_summary)
+mcp.tool(derive_table)
 mcp.tool(hypothesis_add)
 mcp.tool(hypothesis_list)
 mcp.tool(hypothesis_update)
