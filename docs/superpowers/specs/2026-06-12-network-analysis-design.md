@@ -30,10 +30,10 @@ server.py         →  mcp.tool(derive_table); EXPECTED_TOOL_COUNT = 19
 
 ```toml
 # pyproject.toml addition
-networkx = ">=3.2"
+python-igraph = ">=0.11"
 ```
 
-No extra community-detection package needed — `networkx.community.louvain_communities` is available since networkx 3.0. No other new dependencies; `networkx` is the only addition.
+`python-igraph` is C-backed — betweenness centrality and Louvain community detection are 10–100× faster than networkx for large graphs. Louvain is built-in (`Graph.community_multilevel()`). No other new dependencies.
 
 ### New artifacts
 
@@ -125,18 +125,18 @@ Missing `source_col` or `target_col` raises `ValueError`.
 ### Graph construction (shared)
 
 ```python
-import networkx as nx
+import igraph as ig
 
 def _build_graph(df, source_col, target_col, weight_col=None):
-    if weight_col:
-        G = nx.from_pandas_edgelist(df, source=source_col, target=target_col,
-                                    edge_attr=weight_col)
-    else:
-        G = nx.from_pandas_edgelist(df, source=source_col, target=target_col)
+    edges = list(zip(df[source_col].astype(str), df[target_col].astype(str)))
+    weights = list(df[weight_col]) if weight_col else None
+    G = ig.Graph.TupleList(edges, directed=False, weights=weights is not None)
+    if weights:
+        G.es["weight"] = weights
     return G
 ```
 
-Graph is always undirected (`Graph`, not `DiGraph`) in Phase 4.5. Directed support is a future extension.
+Graph is always undirected in Phase 4.5. Directed support is a future extension.
 
 ---
 
@@ -209,6 +209,8 @@ run_model(project, table, method="network_communities",
 ```
 
 Saves `{finding_id}_communities.json`: `{"node_id": community_int, …}`.
+
+Uses `G.community_multilevel()` (igraph's Louvain implementation). Modularity via `G.modularity(membership)`.
 
 **Explainability ratings** (added to existing table in spec §5):
 
@@ -296,7 +298,7 @@ tests/
 
 **`derive_table` tests:** happy path (SELECT creates table, manifest updated with `profiled=False`), write-blocked (INSERT raises ValueError), overwrite idempotent (calling twice with same `table_name` succeeds).
 
-**Synthetic fixture:** 50-node, 100-edge random graph built with `networkx.gnm_random_graph(50, 100, seed=42)`, exported to a DataFrame with columns `source`, `target`, `weight`.
+**Synthetic fixture:** 50-node, 100-edge random graph built with `igraph.Graph.Erdos_Renyi(n=50, m=100, directed=False)`, exported to a DataFrame with columns `source` (str node name), `target` (str node name), `weight` (float 1.0).
 
 Each method: one happy-path test, one "fewer than 2 nodes" error test.
 
@@ -310,7 +312,7 @@ Each method: one happy-path test, one "fewer than 2 nodes" error test.
 
 To add directed graph support later:
 1. Add `directed=False` param to all three network methods.
-2. Switch `nx.from_pandas_edgelist` → `nx.from_pandas_edgelist` with `create_using=nx.DiGraph()`.
-3. Degree → in-degree + out-degree.
+2. Pass `directed=True` to `ig.Graph.TupleList(...)`.
+3. Degree → `G.indegree()` + `G.outdegree()`.
 
 No changes to tool contracts or `server.py`.
