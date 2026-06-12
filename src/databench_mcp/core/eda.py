@@ -400,6 +400,96 @@ def add_rolling(
     }
 
 
+
+def enrich_table(
+    project: str,
+    left_table: str,
+    right_table: str,
+    on: "str | list[str]",
+    new_table_name: str,
+    how: str = "inner",
+) -> dict:
+    """Join two profiled tables and register the result."""
+    # Validate how
+    valid_how = {"inner", "left", "right", "full"}
+    if how not in valid_how:
+        raise ValueError(f"unknown join type '{how}'")
+
+    # Validate table names and new_table_name
+    ident_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    for name in (new_table_name, left_table, right_table):
+        if not ident_re.match(name):
+            raise ValueError(f"invalid identifier: {name!r}")
+
+    # Normalize on to list
+    if isinstance(on, str):
+        on_list = [on]
+    else:
+        on_list = list(on)
+
+    if not on_list:
+        raise ValueError("on must specify at least one join column")
+
+    for col in on_list:
+        if not ident_re.match(col):
+            raise ValueError(f"invalid column identifier: {col!r}")
+
+    # Check both tables are profiled
+    from databench_mcp.workspace import assert_profiled
+    assert_profiled(project, left_table)
+    assert_profiled(project, right_table)
+
+    # Build HOW clause
+    how_clause_map = {
+        "inner": "INNER",
+        "left": "LEFT",
+        "right": "RIGHT",
+        "full": "FULL OUTER",
+    }
+    how_clause = how_clause_map[how]
+
+    # Build USING clause
+    using_cols = ", ".join(f'"{col}"' for col in on_list)
+    using_clause = f"USING ({using_cols})"
+
+    sql = (
+        f'CREATE OR REPLACE TABLE "{new_table_name}" AS ('
+        f'SELECT * FROM "{left_table}" '
+        f'{how_clause} JOIN "{right_table}" '
+        f'{using_clause}'
+        f')' 
+    )
+
+    conn = get_connection(project)
+    conn.execute(sql)
+
+    row_count = conn.execute(f'SELECT COUNT(*) FROM "{new_table_name}"').fetchone()[0]
+    col_count = len(conn.execute(f'SELECT * FROM "{new_table_name}" LIMIT 0').description)
+
+    manifest = read_manifest(project)
+    manifest["datasets"][new_table_name] = {
+        "source": "enrich_table",
+        "left_table": left_table,
+        "right_table": right_table,
+        "on": on_list,
+        "how": how,
+        "profiled": False,
+        "row_count": int(row_count),
+        "col_count": int(col_count),
+    }
+    write_manifest(project, manifest)
+
+    return {
+        "table": new_table_name,
+        "left_table": left_table,
+        "right_table": right_table,
+        "how": how,
+        "on": on_list,
+        "rows": int(row_count),
+        "columns": int(col_count),
+    }
+
+
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
     stripped = sql.strip().rstrip(";")

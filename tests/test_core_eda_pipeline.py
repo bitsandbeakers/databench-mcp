@@ -5,7 +5,7 @@ import duckdb
 import pytest
 
 import databench_mcp.workspace as ws
-from databench_mcp.core.eda import group_summary, clean_table, add_lag, add_rolling
+from databench_mcp.core.eda import group_summary, clean_table, add_lag, add_rolling, enrich_table
 
 
 @pytest.fixture
@@ -33,6 +33,26 @@ def project(tmp_path, monkeypatch):
     }
     ws.write_manifest("p", manifest)
     return tmp_path
+
+
+def _register_regions_table(project_name):
+    """Create a 'regions' table in project 'p' and register it in the manifest."""
+    from databench_mcp.workspace import project_path, read_manifest, write_manifest
+    import duckdb
+    db_path = project_path(project_name) / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        conn.execute("CREATE OR REPLACE TABLE regions AS SELECT * FROM (VALUES ('A', 'NE'), ('B', 'SW')) AS t(region, code)")
+    manifest = read_manifest(project_name)
+    manifest["datasets"]["regions"] = {
+        "source": "ingest_file",
+        "profiled": True,
+        "profile": {
+            "region": {"type": "VARCHAR", "null_pct": 0.0, "approx_unique": 2},
+            "code": {"type": "VARCHAR", "null_pct": 0.0, "approx_unique": 2},
+        },
+        "row_count": 2,
+    }
+    write_manifest(project_name, manifest)
 
 
 def test_group_summary_basic(project, monkeypatch):
@@ -333,3 +353,73 @@ def test_add_rolling_manifest_has_new_col(project, monkeypatch):
     manifest = read_manifest("p")
     ds = manifest["datasets"]["sales_rolled_nc"]
     assert ds["new_col"] == "revenue_rolling_3_std"
+
+
+# --- enrich_table tests ---
+
+def test_enrich_table_inner(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    _register_regions_table("p")
+    result = enrich_table("p", "sales", "regions", "region", "sales_enriched")
+    assert result["table"] == "sales_enriched"
+    assert result["left_table"] == "sales"
+    assert result["right_table"] == "regions"
+    assert result["how"] == "inner"
+    assert "region" in result["on"]
+    assert result["rows"] > 0
+
+def test_enrich_table_left_has_more_rows(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    _register_regions_table("p")
+    result_inner = enrich_table("p", "sales", "regions", "region", "sales_inner")
+    result_left = enrich_table("p", "sales", "regions", "region", "sales_left", how="left")
+    assert result_left["rows"] >= result_inner["rows"]
+
+def test_enrich_table_columns_in_db(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    _register_regions_table("p")
+    enrich_table("p", "sales", "regions", "region", "sales_enriched2")
+    import duckdb
+    from databench_mcp.workspace import project_path
+    db_path = project_path("p") / "project.duckdb"
+    with duckdb.connect(str(db_path)) as conn:
+        cols = [r[0] for r in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'sales_enriched2'").fetchall()]
+    assert "code" in cols
+    assert "revenue" in cols
+
+def test_enrich_table_registers_manifest(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    _register_regions_table("p")
+    enrich_table("p", "sales", "regions", "region", "sales_enriched3")
+    from databench_mcp.workspace import read_manifest
+    manifest = read_manifest("p")
+    ds = manifest["datasets"]["sales_enriched3"]
+    assert ds["source"] == "enrich_table"
+    assert ds["left_table"] == "sales"
+    assert ds["right_table"] == "regions"
+    assert ds["on"] == ["region"]
+    assert ds["how"] == "inner"
+
+def test_enrich_table_unknown_how(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="unknown join type"):
+        enrich_table("p", "sales", "sales", "region", "should_fail", how="cross")
+
+def test_enrich_table_empty_on(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="at least one join column"):
+        enrich_table("p", "sales", "sales", [], "should_fail")
+
+def test_enrich_table_on_string_normalised(project, monkeypatch):
+    import databench_mcp.workspace as ws
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    _register_regions_table("p")
+    result = enrich_table("p", "sales", "regions", "region", "sales_enriched4")
+    assert isinstance(result["on"], list)
+    assert result["on"] == ["region"]
