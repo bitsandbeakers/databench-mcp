@@ -25,6 +25,64 @@ def _to_json_safe(val: Any) -> Any:
     return str(val)
 
 
+_AGG_FN_MAP = {
+    "mean": "AVG",
+    "count": "COUNT",
+    "min": "MIN",
+    "max": "MAX",
+    "std": "STDDEV",
+}
+
+
+def group_summary(
+    project: str,
+    table: str,
+    group_col: str,
+    agg_cols: list[str],
+    agg_fns: list[str] | None = None,
+) -> dict[str, Any]:
+    """Return grouped aggregates for the given table."""
+    from databench_mcp.workspace import assert_profiled
+
+    if agg_fns is None:
+        agg_fns = list(_AGG_FN_MAP.keys())
+    if not agg_cols:
+        raise ValueError("agg_cols must not be empty")
+    unknown = [f for f in agg_fns if f not in _AGG_FN_MAP]
+    if unknown:
+        raise ValueError(f"unknown agg_fn {unknown[0]!r}")
+    assert_profiled(project, table)
+
+    agg_parts = ", ".join(
+        f'{_AGG_FN_MAP[fn]}("{col}") AS "{col}_{fn}"'
+        for col in agg_cols
+        for fn in agg_fns
+    )
+    sql = (
+        f'SELECT "{group_col}", {agg_parts} '
+        f'FROM "{table}" '
+        f'GROUP BY "{group_col}" '
+        f'ORDER BY "{group_col}"'
+    )
+    with get_connection(project) as conn:
+        cursor = conn.execute(sql)
+        columns = [d[0] for d in cursor.description]
+        raw_rows = cursor.fetchall()
+
+    rows = [
+        {col: _to_json_safe(val) for col, val in zip(columns, row)}
+        for row in raw_rows
+    ]
+    return {
+        "table": table,
+        "group_col": group_col,
+        "agg_cols": agg_cols,
+        "agg_fns": agg_fns,
+        "rows": rows,
+        "row_count": len(rows),
+    }
+
+
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
     stripped = sql.strip().rstrip(";")
