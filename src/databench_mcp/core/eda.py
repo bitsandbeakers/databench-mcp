@@ -83,6 +83,170 @@ def group_summary(
     }
 
 
+_CLEAN_STRATEGIES = {
+    "drop_rows", "drop_cols",
+    "fill_mean", "fill_median", "fill_mode", "fill_constant",
+    "fill_forward", "fill_backward",
+}
+_NUMERIC_TYPES = (
+    "DOUBLE", "FLOAT", "INT", "REAL", "DECIMAL",
+    "NUMERIC", "BIGINT", "SMALLINT", "TINYINT", "HUGEINT",
+)
+
+
+def _fill_select(table: str, affected: list[str], select_parts: list[str]) -> str:
+    """SELECT * EXCLUDE affected cols, then override with select_parts expressions."""
+    if not affected:
+        return f'SELECT * FROM "{table}"'
+    exclude = ", ".join(f'"{c}"' for c in affected)
+    overrides = ", ".join(select_parts)
+    return f'SELECT * EXCLUDE ({exclude}), {overrides} FROM "{table}"'
+
+
+def _fill_select_rn(table: str, affected: list[str], select_parts: list[str]) -> str:
+    """Same as _fill_select but via a ROW_NUMBER() CTE for forward/backward fill."""
+    if not affected:
+        return f'SELECT * FROM "{table}"'
+    all_excludes = [f'"{c}"' for c in affected] + ['"_rn"']
+    exclude = ", ".join(all_excludes)
+    overrides = ", ".join(select_parts)
+    return (
+        f'WITH _base AS (SELECT *, ROW_NUMBER() OVER () AS _rn FROM "{table}") '
+        f'SELECT * EXCLUDE ({exclude}), {overrides} FROM _base'
+    )
+
+
+def clean_table(
+    project: str,
+    table: str,
+    strategy: str,
+    new_table_name: str,
+    columns: list[str] | None = None,
+    fill_value: float | str | None = None,
+) -> dict[str, Any]:
+    """Materialise a cleaned version of *table* as *new_table_name*."""
+    from databench_mcp.workspace import assert_profiled
+
+    if strategy not in _CLEAN_STRATEGIES:
+        raise ValueError(f"unknown strategy {strategy!r}")
+    if strategy == "fill_constant" and fill_value is None:
+        raise ValueError("fill_value required for fill_constant")
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", new_table_name):
+        raise ValueError(
+            f"new_table_name must be a simple identifier (got {new_table_name!r})"
+        )
+
+    assert_profiled(project, table)
+    manifest = read_manifest(project)
+    profile = manifest["datasets"][table].get("profile", {})
+
+    if columns is not None:
+        affected = list(columns)
+    elif strategy in ("drop_rows", "drop_cols"):
+        affected = [c for c, info in profile.items() if info.get("null_pct", 0) > 0]
+    else:
+        affected = [
+            c for c, info in profile.items()
+            if info.get("null_pct", 0) > 0
+            and any(t in info.get("type", "").upper() for t in _NUMERIC_TYPES)
+        ]
+
+    if strategy == "drop_rows":
+        if affected:
+            where = " AND ".join(f'"{c}" IS NOT NULL' for c in affected)
+            body = f'SELECT * FROM "{table}" WHERE {where}'
+        else:
+            body = f'SELECT * FROM "{table}"'
+
+    elif strategy == "drop_cols":
+        with get_connection(project) as conn:
+            all_cols = [
+                d[0] for d in conn.execute(
+                    f'SELECT * FROM "{table}" LIMIT 0'
+                ).description
+            ]
+        keep = [c for c in all_cols if c not in affected]
+        if not keep:
+            raise ValueError("strategy would drop all columns")
+        body = (
+            "SELECT " + ", ".join(f'"{c}"' for c in keep)
+            + f' FROM "{table}"'
+        )
+
+    elif strategy == "fill_mean":
+        parts = [
+            f'COALESCE("{c}", AVG("{c}") OVER ()) AS "{c}"' for c in affected
+        ]
+        body = _fill_select(table, affected, parts)
+
+    elif strategy == "fill_median":
+        parts = [
+            f'COALESCE("{c}", (SELECT PERCENTILE_CONT(0.5) WITHIN GROUP '
+            f'(ORDER BY "{c}") FROM "{table}")) AS "{c}"'
+            for c in affected
+        ]
+        body = _fill_select(table, affected, parts)
+
+    elif strategy == "fill_mode":
+        parts = [
+            f'COALESCE("{c}", (SELECT mode("{c}") FROM "{table}")) AS "{c}"'
+            for c in affected
+        ]
+        body = _fill_select(table, affected, parts)
+
+    elif strategy == "fill_constant":
+        if isinstance(fill_value, str):
+            literal = "'" + fill_value.replace("'", "''") + "'"
+        else:
+            literal = str(fill_value)
+        parts = [f'COALESCE("{c}", {literal}) AS "{c}"' for c in affected]
+        body = _fill_select(table, affected, parts)
+
+    elif strategy == "fill_forward":
+        parts = [
+            f'LAST_VALUE("{c}" IGNORE NULLS) OVER '
+            f'(ORDER BY _rn ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "{c}"'
+            for c in affected
+        ]
+        body = _fill_select_rn(table, affected, parts)
+
+    else:  # fill_backward
+        parts = [
+            f'FIRST_VALUE("{c}" IGNORE NULLS) OVER '
+            f'(ORDER BY _rn ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS "{c}"'
+            for c in affected
+        ]
+        body = _fill_select_rn(table, affected, parts)
+
+    with get_connection(project) as conn:
+        conn.execute(f'CREATE OR REPLACE TABLE "{new_table_name}" AS ({body})')
+        row_count = conn.execute(
+            f'SELECT COUNT(*) FROM "{new_table_name}"'
+        ).fetchone()[0]
+        col_count = len(
+            conn.execute(f'SELECT * FROM "{new_table_name}" LIMIT 0').description
+        )
+
+    manifest["datasets"][new_table_name] = {
+        "source": "clean_table",
+        "source_table": table,
+        "strategy": strategy,
+        "profiled": False,
+        "row_count": int(row_count),
+        "col_count": int(col_count),
+    }
+    write_manifest(project, manifest)
+
+    return {
+        "table": new_table_name,
+        "source_table": table,
+        "strategy": strategy,
+        "rows": int(row_count),
+        "columns": int(col_count),
+        "affected_cols": affected,
+    }
+
+
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
     stripped = sql.strip().rstrip(";")

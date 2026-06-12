@@ -5,7 +5,7 @@ import duckdb
 import pytest
 
 import databench_mcp.workspace as ws
-from databench_mcp.core.eda import group_summary
+from databench_mcp.core.eda import group_summary, clean_table
 
 
 @pytest.fixture
@@ -82,3 +82,81 @@ def test_group_summary_default_agg_fns_all_present(project, monkeypatch):
     # All 5 default aggregates should be present
     for fn in ["mean", "count", "min", "max", "std"]:
         assert f"revenue_{fn}" in row_a, f"missing revenue_{fn}"
+
+
+@pytest.fixture
+def project_nulls(tmp_path, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", tmp_path)
+    ws.ensure_project("q")
+    db_path = str(tmp_path / "q" / "project.duckdb")
+    conn = duckdb.connect(db_path)
+    conn.execute("""
+        CREATE TABLE readings AS
+        SELECT 1.0 AS temp, 2.0 AS humidity UNION ALL
+        SELECT NULL,        3.0            UNION ALL
+        SELECT 3.0,         NULL           UNION ALL
+        SELECT NULL,        NULL
+    """)
+    conn.close()
+    manifest = ws.read_manifest("q")
+    manifest["datasets"]["readings"] = {
+        "profiled": True, "row_count": 4, "col_count": 2,
+        "profile": {
+            "temp":     {"type": "DOUBLE", "null_pct": 50.0, "approx_unique": 2},
+            "humidity": {"type": "DOUBLE", "null_pct": 50.0, "approx_unique": 2},
+        },
+    }
+    ws.write_manifest("q", manifest)
+    return tmp_path
+
+
+def test_clean_table_drop_rows(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    result = clean_table("q", "readings", "drop_rows", "clean_readings", columns=["temp"])
+    assert result["rows"] < 4
+    assert result["source_table"] == "readings"
+    assert result["strategy"] == "drop_rows"
+
+
+def test_clean_table_fill_mean(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    clean_table("q", "readings", "fill_mean", "clean_mean")
+    from databench_mcp.db import get_connection
+    with get_connection("q") as conn:
+        null_count = conn.execute(
+            'SELECT COUNT(*) FROM "clean_mean" WHERE "temp" IS NULL'
+        ).fetchone()[0]
+    assert null_count == 0
+
+
+def test_clean_table_fill_constant(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    clean_table("q", "readings", "fill_constant", "clean_const",
+                columns=["temp"], fill_value=-999.0)
+    from databench_mcp.db import get_connection
+    with get_connection("q") as conn:
+        vals = conn.execute(
+            'SELECT "temp" FROM "clean_const" WHERE "temp" = -999.0'
+        ).fetchall()
+    assert len(vals) == 2
+
+
+def test_clean_table_fill_constant_requires_fill_value(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    with pytest.raises(ValueError, match="fill_value required"):
+        clean_table("q", "readings", "fill_constant", "bad")
+
+
+def test_clean_table_unknown_strategy(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    with pytest.raises(ValueError, match="unknown strategy"):
+        clean_table("q", "readings", "magic_fix", "bad")
+
+
+def test_clean_table_registers_manifest(project_nulls, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project_nulls)
+    clean_table("q", "readings", "drop_rows", "clean_drop", columns=["temp"])
+    manifest = ws.read_manifest("q")
+    ds = manifest["datasets"]["clean_drop"]
+    assert ds["source"] == "clean_table"
+    assert ds["source_table"] == "readings"
