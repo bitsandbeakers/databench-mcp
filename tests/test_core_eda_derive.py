@@ -57,3 +57,9 @@ def test_derive_table_rejects_multi_statement(project, monkeypatch):
     monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
     with pytest.raises(ValueError, match="Multi-statement"):
         derive_table("p", "SELECT 1; SELECT 2", "bad")
+
+
+def test_derive_table_rejects_invalid_table_name(project, monkeypatch):
+    monkeypatch.setattr(ws, "WORKSPACE_ROOT", project)
+    with pytest.raises(ValueError, match="simple identifier"):
+        derive_table("p", "SELECT * FROM edges", 'bad"name')

@@ -84,6 +84,8 @@ def eda_summary(project: str) -> dict[str, Any]:
 
 def derive_table(project: str, sql: str, table_name: str) -> dict[str, Any]:
     """Materialise a SQL SELECT as a new DuckDB table; register in manifest as profiled=False."""
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table_name):
+        raise ValueError(f"table_name must be a simple identifier (got {table_name!r})")
     stripped = sql.strip().rstrip(";")
     if not _SELECT_PATTERN.match(stripped):
         raise ValueError("Only SELECT or WITH queries are permitted")
