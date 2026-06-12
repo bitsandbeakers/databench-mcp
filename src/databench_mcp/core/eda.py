@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime
 import decimal
+import math
 import re
 from typing import Any
 
@@ -131,6 +132,8 @@ def clean_table(
         raise ValueError(f"unknown strategy {strategy!r}")
     if strategy == "fill_constant" and fill_value is None:
         raise ValueError("fill_value required for fill_constant")
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", table):
+        raise ValueError(f"table must be a simple identifier (got {table!r})")
     if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", new_table_name):
         raise ValueError(
             f"new_table_name must be a simple identifier (got {new_table_name!r})"
@@ -195,6 +198,8 @@ def clean_table(
         body = _fill_select(table, affected, parts)
 
     elif strategy == "fill_constant":
+        if isinstance(fill_value, float) and not math.isfinite(fill_value):
+            raise ValueError(f"fill_value must be a finite number (got {fill_value!r})")
         if isinstance(fill_value, str):
             literal = "'" + fill_value.replace("'", "''") + "'"
         else:
