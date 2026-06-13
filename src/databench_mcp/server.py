@@ -19,6 +19,7 @@ from databench_mcp.tools.eda import (
     add_lag,
     add_rolling,
     clean_table,
+    data_quality_report,
     derive_table,
     eda_summary,
     enrich_table,
@@ -27,7 +28,7 @@ from databench_mcp.tools.eda import (
 )
 from databench_mcp.tools.hypothesis import hypothesis_add, hypothesis_list, hypothesis_record_evidence, hypothesis_update
 from databench_mcp.tools.ingest import ingest_file, ingest_url
-from databench_mcp.tools.modeling import list_findings, run_model, similarity_network
+from databench_mcp.tools.modeling import compare_findings, list_findings, run_model, similarity_network
 from databench_mcp.tools.profile import profile_table
 from databench_mcp.tools.project import project_create, project_list, project_status
 from databench_mcp.tools.recipes import reconstruct_recipe, run_recipe
@@ -36,7 +37,7 @@ from databench_mcp.tools.viz import create_chart, create_subplot
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 31
+EXPECTED_TOOL_COUNT = 33
 
 
 async def ping() -> dict[str, Any]:
@@ -53,6 +54,7 @@ mcp.tool(ingest_url)
 mcp.tool(profile_table)
 mcp.tool(sql_query)
 mcp.tool(eda_summary)
+mcp.tool(data_quality_report)
 mcp.tool(derive_table)
 mcp.tool(group_summary)
 mcp.tool(clean_table)
@@ -68,6 +70,7 @@ mcp.tool(analyze_distribution)
 mcp.tool(analyze_correlations)
 mcp.tool(run_model)
 mcp.tool(list_findings)
+mcp.tool(compare_findings)
 mcp.tool(similarity_network)
 mcp.tool(peer_outliers)
 mcp.tool(create_chart)

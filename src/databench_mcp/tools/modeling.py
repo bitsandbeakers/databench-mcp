@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from databench_mcp.core.findings import compare_findings as _compare_findings
 from databench_mcp.core.findings import list_findings as _list_findings
 from databench_mcp.core.modeling import run_model as _run_model
 from databench_mcp.core.modeling import similarity_network as _similarity_network
@@ -36,6 +37,26 @@ def list_findings(
 ) -> dict[str, Any]:
     """List all findings for a project, optionally filtered by method."""
     return _list_findings(project, method)
+
+
+def compare_findings(
+    project: str,
+    finding_ids: list[str],
+    metrics: list[str] | None = None,
+    rank_by: str | None = None,
+) -> dict[str, Any]:
+    """Compare metrics across multiple findings and rank by a chosen metric.
+
+    Use after running several models to pick the best one or understand trade-offs.
+
+    Parameters
+    ----------
+    finding_ids : IDs to compare, e.g. ['f001', 'f003', 'f005']
+    metrics     : metric keys to extract, e.g. ['r2', 'rmse', 'mae'];
+                  if omitted all stored metrics are returned
+    rank_by     : metric to sort by descending (defaults to first of metrics)
+    """
+    return _compare_findings(project, finding_ids, metrics, rank_by)
 
 
 def similarity_network(

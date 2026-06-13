@@ -6,6 +6,7 @@ from typing import Any
 from databench_mcp.core.eda import add_lag as _add_lag
 from databench_mcp.core.eda import add_rolling as _add_rolling
 from databench_mcp.core.eda import clean_table as _clean_table
+from databench_mcp.core.eda import data_quality_report as _data_quality_report
 from databench_mcp.core.eda import derive_table as _derive_table
 from databench_mcp.core.eda import eda_summary as _eda_summary
 from databench_mcp.core.eda import enrich_table as _enrich_table
@@ -74,6 +75,18 @@ def add_rolling(
 ) -> dict[str, Any]:
     """Add a rolling-window aggregate column to a time-series table."""
     return _add_rolling(project, table, col, window, agg_fn, new_table_name, time_col)
+
+
+def data_quality_report(project: str, table: str) -> dict[str, Any]:
+    """Analyse a profiled table for data quality issues.
+
+    Checks for extreme/high/moderate nulls, constant or near-constant columns,
+    likely ID columns masquerading as features, and high coefficient-of-variation
+    on numeric columns. Returns a quality score (0–1) and sorted issue list.
+
+    Call this immediately after profile_table on any newly ingested table.
+    """
+    return _data_quality_report(project, table)
 
 
 def enrich_table(

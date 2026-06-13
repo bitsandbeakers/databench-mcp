@@ -487,6 +487,108 @@ def enrich_table(
     }
 
 
+_NUMERIC_TYPE_TOKENS = ("DOUBLE", "FLOAT", "INT", "REAL", "DECIMAL", "NUMERIC", "BIGINT", "SMALLINT", "TINYINT", "HUGEINT")
+_SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+_SEVERITY_WEIGHT = {"high": 3, "medium": 1, "low": 0.3}
+
+
+def data_quality_report(project: str, table: str) -> dict[str, Any]:
+    """Analyse a profiled table and return actionable data quality issues.
+
+    Checks each column for: extreme/high/moderate nulls, constant or near-constant
+    values, likely ID columns masquerading as features, and high coefficient-of-
+    variation on numeric columns. Returns a quality score (0–1) and a sorted issue
+    list (high → medium → low severity).
+    """
+    from databench_mcp.workspace import assert_profiled
+
+    assert_profiled(project, table)
+    manifest = read_manifest(project)
+    ds = manifest["datasets"][table]
+    profile = ds.get("profile", {})
+    row_count = ds.get("row_count", 0) or 0
+
+    issues: list[dict[str, Any]] = []
+
+    for col, info in profile.items():
+        null_pct = info.get("null_pct") or 0.0
+        approx_unique = info.get("approx_unique") or 0
+        col_type = (info.get("type") or "").upper()
+        mean = info.get("mean")
+        std = info.get("std")
+        is_numeric = any(t in col_type for t in _NUMERIC_TYPE_TOKENS)
+
+        # Null rate tiers
+        if null_pct >= 90:
+            issues.append({
+                "column": col, "severity": "high", "issue": "extreme_nulls",
+                "detail": f"{null_pct:.1f}% null — column is nearly empty",
+            })
+        elif null_pct >= 50:
+            issues.append({
+                "column": col, "severity": "medium", "issue": "high_nulls",
+                "detail": f"{null_pct:.1f}% null — over half missing",
+            })
+        elif null_pct >= 20:
+            issues.append({
+                "column": col, "severity": "low", "issue": "moderate_nulls",
+                "detail": f"{null_pct:.1f}% null",
+            })
+
+        # Constant / near-constant
+        if approx_unique <= 1:
+            issues.append({
+                "column": col, "severity": "high", "issue": "constant_column",
+                "detail": f"{approx_unique} distinct value(s) — carries no information",
+            })
+        elif row_count > 0 and approx_unique <= 4 and (approx_unique / row_count) < 0.01:
+            issues.append({
+                "column": col, "severity": "medium", "issue": "near_constant",
+                "detail": f"{approx_unique} distinct values across {row_count:,} rows",
+            })
+
+        # Likely ID column (high-cardinality non-numeric)
+        if not is_numeric and row_count > 0 and (approx_unique / row_count) > 0.95:
+            issues.append({
+                "column": col, "severity": "medium", "issue": "likely_id_column",
+                "detail": f"{approx_unique:,}/{row_count:,} distinct — likely an ID, not a feature",
+            })
+
+        # High coefficient of variation (numeric)
+        if is_numeric and std is not None and mean is not None and mean != 0:
+            cv = abs(std / mean)
+            if cv > 5:
+                issues.append({
+                    "column": col, "severity": "low", "issue": "high_variation",
+                    "detail": f"CV={cv:.1f} — potential outlier concentration or mixed scales",
+                })
+
+    issues.sort(key=lambda x: _SEVERITY_ORDER[x["severity"]])
+
+    # Quality score: 1.0 = no issues, decays with weighted penalty
+    penalty = sum(_SEVERITY_WEIGHT[i["severity"]] for i in issues)
+    max_penalty = len(profile) * _SEVERITY_WEIGHT["high"] if profile else 1
+    quality_score = round(max(0.0, 1.0 - penalty / max_penalty), 3)
+
+    counts = {s: sum(1 for i in issues if i["severity"] == s) for s in _SEVERITY_ORDER}
+    if not issues:
+        summary = f"No issues found across {len(profile)} columns. Quality score: 1.0."
+    else:
+        parts = [f"{counts[s]} {s}" for s in ("high", "medium", "low") if counts[s]]
+        summary = f"{len(issues)} issue(s): {', '.join(parts)}. Quality score: {quality_score}."
+
+    return {
+        "project": project,
+        "table": table,
+        "total_columns": len(profile),
+        "row_count": row_count,
+        "issue_count": len(issues),
+        "quality_score": quality_score,
+        "issues": issues,
+        "summary": summary,
+    }
+
+
 def sql_query(project: str, sql: str, limit: int = _DEFAULT_LIMIT) -> dict[str, Any]:
     """Execute a read-only SELECT/WITH query and return up to `limit` rows."""
     stripped = sql.strip().rstrip(";")

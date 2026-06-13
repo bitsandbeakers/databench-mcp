@@ -70,3 +70,57 @@ def list_findings(
     if method is not None:
         findings = [f for f in findings if f.get("method") == method]
     return {"project": project, "count": len(findings), "findings": findings}
+
+
+def compare_findings(
+    project: str,
+    finding_ids: list[str],
+    metrics: list[str] | None = None,
+    rank_by: str | None = None,
+) -> dict[str, Any]:
+    """Compare metrics across multiple findings and rank by a chosen metric.
+
+    Parameters
+    ----------
+    finding_ids : list of finding IDs to compare (e.g. ['f001', 'f003'])
+    metrics     : specific metric keys to extract (e.g. ['r2', 'rmse']); if
+                  omitted all stored metrics are returned
+    rank_by     : metric to sort by descending; defaults to first item of metrics
+    """
+    read_manifest(project)
+    all_findings = _read_findings(project)
+    by_id = {f["id"]: f for f in all_findings}
+
+    missing = [fid for fid in finding_ids if fid not in by_id]
+    if missing:
+        raise ValueError(f"Finding(s) not found in project '{project}': {missing}")
+
+    rows = []
+    for fid in finding_ids:
+        f = by_id[fid]
+        stored_metrics = f.get("metrics", {})
+        row: dict[str, Any] = {
+            "id": fid,
+            "method": f.get("method"),
+            "table": f.get("table"),
+            "target": f.get("target"),
+            "created_at": f.get("created_at"),
+            "metrics": {m: stored_metrics.get(m) for m in metrics} if metrics else dict(stored_metrics),
+        }
+        rows.append(row)
+
+    effective_rank = rank_by or (metrics[0] if metrics else None)
+    if effective_rank:
+        rows.sort(
+            key=lambda r: (r["metrics"].get(effective_rank) is not None,
+                           r["metrics"].get(effective_rank) or 0),
+            reverse=True,
+        )
+
+    return {
+        "project": project,
+        "finding_count": len(rows),
+        "ranked_by": effective_rank,
+        "metrics_compared": metrics,
+        "findings": rows,
+    }
