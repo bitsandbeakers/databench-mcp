@@ -83,6 +83,40 @@ From HCRIS FY2023 (6,103 hospitals), grouped by Rural/Urban × facility type:
 
 ---
 
+## Ownership effect — deep dive
+
+Script: `prov_ownership_explore.py`. Binary for-profit (n=647) vs non-for-profit (n=2,286).
+
+**The premium survives every control** (cumulative, OLS):
+
+| Model | For-profit premium |
+|-------|:---:|
+| Raw | +62.5% |
+| + case-mix | +55.2% |
+| + archetype | +55.9% |
+| + urbanicity | +52.9% |
+| + state (full) | **+46.3%** |
+
+It barely erodes — geography and case mix explain only a small part. ~46% is an ownership-level pricing difference.
+
+**Concentration (case-mix + state controlled):**
+
+| Archetype | For-profit premium | n_fp |
+|-----------|:---:|:---:|
+| Generalist | +64.6% | 358 |
+| Rehab-Specialty | +50.4% | 60 |
+| Academic-Tertiary | +46.7% | 61 |
+| Rural-SmallAcute | +22.8% | 17 |
+| Surgical-Specialty | **−11.0%** | 83 |
+
+- Premium concentrates in **community generalist** hospitals — the substitutable, steerable services.
+- Physician-owned **surgical-specialty** for-profits charge *less* (competitive niche).
+- **Non-metro +56.9% vs metro +41.2%** — larger premium where competition is thinner (pricing power).
+
+**Chain effect:** HCA-branded for-profits sit **+113%** above case-mix expectation vs +30% for other for-profits (n=60; name-detection undercounts HCA, so understated). Top for-profit over-chargers (full-model residual) match h008/h013: Carepoint (NJ ×2), Regional Med Ctr San Jose (CA, HCA), Merit Health (MS ×4, CHS), Gadsden/Brookwood (AL), Desert Springs (NV).
+
+This corroborates h008 (for-profit chains cluster as outliers) and h013 (steerage targets) with quantified effect sizes. *Note:* clean chain attribution needs the CMS ownership/chain enrollment file — name-detection is a lower bound.
+
 ## Causal analysis — recommended next step (not run)
 
 The affordability thesis is implicitly interventional ("steer volume to lower-cost providers to reduce spend"). To move from association to effect:
