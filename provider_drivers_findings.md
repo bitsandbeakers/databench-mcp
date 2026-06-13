@@ -11,6 +11,7 @@
 1. **For-profit hospitals charge ~33–46% more for comparable work — and it's pricing behavior, not cost.** Net of case mix, geography, and archetype, nonprofit charge **−33%** / government **−34%** vs for-profit (3-level), or **+46%** for-profit vs the rest (binary, robust from a +62.5% raw premium). The premium shows up on submitted **charges (+45%)** but **not on Medicare payment (−9%)** — a charging/markup posture, not higher underlying cost. *(Associational — see causal note.)*
 2. **The dominant cost drivers, in order: geography (state) → case-mix → ownership.** This trio is identical across three independent importance methods, and the ranking is perfectly stable across 5 random seeds.
 3. **Rural hospitals are the most exposed to Medicare cuts (h011, supported):** ~2× the Medicare dependence of urban hospitals *and* already-negative operating margins — no cushion to absorb a reimbursement reduction.
+4. **The prize:** ~**$25.8B** of for-profit 2023 Medicare-inpatient charges (32% of their billed; **~$316M per $1B** of charge-anchored spend) is ownership premium above comparable peers — the quantified steerage target. *(Charge-anchored commercial framing; see Dollar sizing.)*
 
 ---
 
@@ -125,6 +126,17 @@ This corroborates h008 (for-profit chains cluster as outliers) and h013 (steerag
 | Medicare payment | **−8.9%** |
 
 For-profits bill ~45% more but Medicare *pays them slightly less* for comparable work. Because Medicare payment is formula-set (not charge-driven), the premium is a **pricing/markup posture, not higher cost of care** — it only bites a charge-based commercial payer. Mirrors h004's mechanism (NV charges 2.1× but Medicare pays 1.08×).
+
+## Dollar sizing — the prize
+
+Script: `prov_leakage_estimate.py`. Billed = submitted charge × discharges, 2023 Medicare inpatient.
+
+- For-profit hospitals billed **$81.6B** (19% of the $430.5B national inpatient total) on 0.65M discharges.
+- **Ownership-attributable excess ≈ $25.8B** — the +46% premium removed (counterfactual: priced like comparable non-for-profits). That's **32% of every for-profit-billed dollar** and **6.0% of all inpatient billed.** (Gross above-benchmark markup at for-profits is even larger, $39.7B / 49%, but that includes non-ownership markup.)
+- **Steerage:** redirecting **50%** of that volume to benchmark-priced peers ≈ **$12.9B** recovered (25% → $6.5B; 100% → $25.8B).
+- **Scalable unit:** ~**$316M of excess per $1B** of charge-anchored inpatient spend at for-profit hospitals.
+
+**Framing caveats:** volume here is *Medicare* inpatient — Medicare pays DRG rates, not charges, so these are charges a **charge-anchored commercial payer would overpay**, not Medicare outlays (commercial volume isn't in the data). The premium is applied as a uniform average. Use the per-$1B unit to scale to an actual commercial book.
 
 ## Causal analysis — recommended next step (not run)
 
