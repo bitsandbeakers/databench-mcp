@@ -132,6 +132,92 @@ def analyze_distribution(
     }
 
 
+def peer_outliers(
+    project: str,
+    table: str,
+    entity_col: str,
+    value_col: str,
+    group_col: str,
+    z_threshold: float = 1.5,
+    top_n: int = 50,
+) -> dict[str, Any]:
+    """Within-group z-score outlier detection for peer benchmarking.
+
+    For each entity, compute the z-score of value_col relative to its group_col
+    peers. Entities above z_threshold are returned ranked by peer_z descending.
+
+    Returns group summary stats and the top_n outliers.
+    """
+    assert_profiled(project, table)
+
+    with get_connection(project) as conn:
+        df = conn.execute(f'SELECT * FROM "{table}"').df()
+
+    for col in (entity_col, value_col, group_col):
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found in table '{table}'")
+
+    if not pd.api.types.is_numeric_dtype(df[value_col]):
+        raise ValueError(f"value_col '{value_col}' must be numeric")
+
+    df = df.dropna(subset=[value_col]).copy()
+    if len(df) < 3:
+        raise ValueError(f"Need at least 3 rows after dropping nulls, got {len(df)}")
+
+    comm_means = df.groupby(group_col)[value_col].transform("mean")
+    comm_stds = df.groupby(group_col)[value_col].transform("std").fillna(1e-9).clip(lower=1e-9)
+    df["peer_z"] = (df[value_col] - comm_means) / comm_stds
+
+    outliers_df = (
+        df[df["peer_z"] > z_threshold]
+        .sort_values("peer_z", ascending=False)
+        .head(top_n)
+    )
+    outliers = [
+        {
+            "entity": str(row[entity_col]),
+            "group": str(row[group_col]),
+            "value": round(float(row[value_col]), 6),
+            "peer_z": round(float(row["peer_z"]), 4),
+        }
+        for _, row in outliers_df.iterrows()
+    ]
+
+    group_stats_raw = (
+        df.groupby(group_col)[value_col]
+        .agg(["count", "mean", "std", "min", "max"])
+        .reset_index()
+    )
+    group_stats = [
+        {
+            "group": str(row[group_col]),
+            "n": int(row["count"]),
+            "mean": round(float(row["mean"]), 6),
+            "std": round(float(row["std"]) if not np.isnan(row["std"]) else 0.0, 6),
+            "min": round(float(row["min"]), 6),
+            "max": round(float(row["max"]), 6),
+        }
+        for _, row in group_stats_raw.iterrows()
+    ]
+
+    return {
+        "entity_col": entity_col,
+        "value_col": value_col,
+        "group_col": group_col,
+        "z_threshold": z_threshold,
+        "total_rows": len(df),
+        "n_outliers": len(outliers),
+        "n_groups": int(df[group_col].nunique()),
+        "outliers": outliers,
+        "group_stats": group_stats,
+        "summary": (
+            f"{len(outliers)} entities in '{value_col}' score above z>{z_threshold} "
+            f"within their '{group_col}' peer group "
+            f"(across {int(df[group_col].nunique())} groups, {len(df)} total rows)."
+        ),
+    }
+
+
 def analyze_correlations(
     project: str,
     table: str,

@@ -6,6 +6,7 @@ from typing import Any
 from databench_mcp.core.analysis import analyze_correlations as _analyze_correlations
 from databench_mcp.core.analysis import analyze_distribution as _analyze_distribution
 from databench_mcp.core.analysis import detect_outliers as _detect_outliers
+from databench_mcp.core.analysis import peer_outliers as _peer_outliers
 
 
 def detect_outliers(
@@ -37,3 +38,21 @@ def analyze_correlations(
 ) -> dict[str, Any]:
     """Return correlation matrix and top N pairs by absolute correlation."""
     return _analyze_correlations(project, table, columns, method, top_n)
+
+
+def peer_outliers(
+    project: str,
+    table: str,
+    entity_col: str,
+    value_col: str,
+    group_col: str,
+    z_threshold: float = 1.5,
+    top_n: int = 50,
+) -> dict[str, Any]:
+    """Within-group z-score outlier detection for peer benchmarking.
+
+    Scores each entity against peers in the same group_col bucket. Returns
+    entities above z_threshold ranked by peer_z, plus per-group summary stats.
+    Use after similarity_network to find steerage candidates within archetypes.
+    """
+    return _peer_outliers(project, table, entity_col, value_col, group_col, z_threshold, top_n)

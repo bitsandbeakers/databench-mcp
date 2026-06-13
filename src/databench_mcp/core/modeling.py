@@ -602,6 +602,116 @@ def _run_network_communities(
 
 
 # ---------------------------------------------------------------------------
+# EBM (ExplainableBoostingRegressor / Classifier)
+# ---------------------------------------------------------------------------
+
+def _run_ebm(
+    df: pd.DataFrame, target: str, features: list[str], params: dict
+) -> dict[str, Any]:
+    """Fit an EBM (GA²M) and return R², feature importances, and per-feature shape data."""
+    from interpret.glassbox import ExplainableBoostingClassifier, ExplainableBoostingRegressor
+
+    _min_rows_check(df)
+    task = _detect_task(df, target, params)
+
+    # Build X preserving dtypes — EBM handles categoricals natively via feature_types
+    X_raw = df[features]
+    y = df[target].astype(float if task == "regression" else int)
+
+    # interpret uses "nominal" for categorical features (not "categorical")
+    _TYPE_MAP = {"categorical": "nominal", "nominal": "nominal", "continuous": "continuous"}
+
+    # Allow caller to pass feature_types as a list or a dict {feature: type}
+    ft_param = params.get("feature_types")
+    if isinstance(ft_param, dict):
+        feature_types = [_TYPE_MAP.get(ft_param.get(f, "continuous"), "continuous") for f in features]
+    elif isinstance(ft_param, list):
+        if len(ft_param) != len(features):
+            raise ValueError(
+                f"feature_types length {len(ft_param)} != features length {len(features)}"
+            )
+        feature_types = [_TYPE_MAP.get(t, t) for t in ft_param]
+    else:
+        # Auto-detect: string/object columns → nominal, else continuous
+        feature_types = [
+            "nominal" if X_raw[f].dtype == object or str(X_raw[f].dtype) == "category"
+            else "continuous"
+            for f in features
+        ]
+
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X_raw.values, y.values, test_size=0.2, random_state=42
+    )
+
+    if task == "regression":
+        model = ExplainableBoostingRegressor(
+            feature_names=features,
+            feature_types=feature_types,
+            random_state=42,
+        )
+        model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_te)
+        base_metrics = _reg_metrics(y_te, y_pred)
+    else:
+        model = ExplainableBoostingClassifier(
+            feature_names=features,
+            feature_types=feature_types,
+            random_state=42,
+        )
+        model.fit(X_tr, y_tr)
+        y_pred = model.predict(X_te)
+        base_metrics = _clf_metrics(y_te, y_pred)
+
+    # Feature importances from global explanation
+    ebm_global = model.explain_global()
+    imp_raw = ebm_global.data()  # top-level data has 'names' and 'scores'
+    importances = {
+        n: round(float(s), 6)
+        for n, s in zip(imp_raw.get("names", features), imp_raw.get("scores", []))
+    }
+
+    # Per-feature shape data: x_vals and y_vals for each main effect
+    shapes: dict[str, Any] = {}
+    for i, feat in enumerate(features):
+        fdata = ebm_global.data(i)
+        ftype = fdata.get("type", "univariate")
+        feat_idx = features.index(feat)
+        is_nominal = feature_types[feat_idx] == "nominal"
+        if ftype == "univariate" and not is_nominal:
+            shapes[feat] = {
+                "type": "continuous",
+                "x": [round(float(v), 4) for v in fdata.get("names", [])],
+                "y": [round(float(v), 6) for v in fdata.get("scores", [])],
+            }
+        else:
+            # Nominal/categorical — names are string category labels
+            shapes[feat] = {
+                "type": "categorical",
+                "x": [str(v) for v in fdata.get("names", [])],
+                "y": [round(float(v), 6) for v in fdata.get("scores", [])],
+            }
+
+    metrics = {
+        **base_metrics,
+        "feature_importance": importances,
+        "n_features": len(features),
+        "feature_types_used": feature_types,
+    }
+    top = max(importances, key=importances.get) if importances else "N/A"
+    task_label = "EBM regression" if task == "regression" else "EBM classification"
+    return {
+        "metrics": metrics,
+        "explainability": "high",
+        "summary": (
+            f"{task_label} on '{target}' — "
+            f"{'R²=' + str(metrics.get('r2')) if task == 'regression' else 'accuracy=' + str(metrics.get('accuracy'))}. "
+            f"Top driver: {top}."
+        ),
+        "ebm_shapes": shapes,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -623,6 +733,7 @@ _REGISTRY: dict[str, Callable] = {
     "network_stats": _run_network_stats,
     "network_centrality": _run_network_centrality,
     "network_communities": _run_network_communities,
+    "ebm": _run_ebm,
 }
 
 
@@ -672,6 +783,7 @@ def run_model(
     cluster_labels = result.pop("cluster_labels", None)
     communities_data = result.pop("communities", None)
     centrality_data = result.pop("centrality", None)
+    ebm_shapes = result.pop("ebm_shapes", None)
 
     finding = add_finding(project, {
         "method": method,
@@ -708,5 +820,170 @@ def run_model(
             json.dumps(centrality_data)
         )
 
+    if ebm_shapes is not None:
+        artifacts_dir = project_path(project) / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+        (artifacts_dir / f"{finding['id']}_ebm_shapes.json").write_text(
+            json.dumps(ebm_shapes)
+        )
+        finding["ebm_shapes"] = ebm_shapes
+
     finding["finding_id"] = finding.pop("id")
     return finding
+
+
+# ---------------------------------------------------------------------------
+# Standalone: similarity_network
+# ---------------------------------------------------------------------------
+
+def similarity_network(
+    project: str,
+    table: str,
+    entity_col: str,
+    code_col: str,
+    volume_col: str,
+    k: int = 8,
+    min_sim: float = 0.05,
+    z_threshold: float = 1.5,
+    value_col: str | None = None,
+) -> dict[str, Any]:
+    """Build a cosine-similarity kNN graph from a long-form entity×code volume table.
+
+    Parameters
+    ----------
+    project, table : workspace + DuckDB table name
+    entity_col     : column identifying each entity (e.g. hospital CCN)
+    code_col       : column with the procedure/product codes (e.g. DRG, APC)
+    volume_col     : numeric column with the volume/count per entity×code pair
+    k              : k-nearest neighbours per entity
+    min_sim        : minimum cosine similarity to include an edge
+    z_threshold    : peer z-score threshold for flagging outliers
+    value_col      : optional numeric column (one value per entity) used to
+                     compute peer-adjusted z-scores (e.g. mean_drg_premium)
+    """
+    import igraph as ig
+    from scipy.sparse import csr_matrix
+    from sklearn.preprocessing import normalize
+
+    assert_profiled(project, table)
+
+    with get_connection(project) as conn:
+        df = conn.execute(f'SELECT * FROM "{table}"').df()
+
+    for col in (entity_col, code_col, volume_col):
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found in table '{table}'")
+    if value_col and value_col not in df.columns:
+        raise ValueError(f"value_col '{value_col}' not found in table '{table}'")
+
+    # Drop rows with null/zero volume
+    df = df.dropna(subset=[volume_col])
+    df = df[df[volume_col] > 0].copy()
+    df[volume_col] = df[volume_col].astype(float)
+
+    entities = sorted(df[entity_col].unique())
+    codes = sorted(df[code_col].unique())
+    N = len(entities)
+    if N < 3:
+        raise ValueError(f"Need at least 3 distinct entities, got {N}")
+
+    ent_idx = {e: i for i, e in enumerate(entities)}
+    code_idx = {c: j for j, c in enumerate(codes)}
+
+    rows = df[entity_col].map(ent_idx).values
+    cols = df[code_col].map(code_idx).values
+    data = df[volume_col].values
+    mat = csr_matrix((data, (rows, cols)), shape=(N, len(codes)))
+    mat_norm = normalize(mat, norm="l2")
+
+    # Cosine similarity via dot product on normalised rows
+    sim_full = (mat_norm @ mat_norm.T).toarray()
+
+    # Build kNN graph (symmetric, no self-loops)
+    k_actual = min(k, N - 1)
+    edge_set: dict[tuple[int, int], float] = {}
+    for i in range(N):
+        top_k = np.argpartition(sim_full[i], -k_actual - 1)[-k_actual - 1:]
+        for j in top_k:
+            if j == i:
+                continue
+            s = float(sim_full[i, j])
+            if s > min_sim:
+                key = (min(i, j), max(i, j))
+                edge_set[key] = max(edge_set.get(key, 0.0), s)
+
+    edge_list = [(i, j, w) for (i, j), w in edge_set.items()]
+    G = ig.Graph(n=N, edges=[(i, j) for i, j, _ in edge_list], directed=False)
+    G.es["weight"] = [w for _, _, w in edge_list]
+    G.vs["name"] = [str(e) for e in entities]
+
+    communities = G.community_multilevel(weights="weight", return_levels=False)
+    membership = communities.membership
+    modularity = round(float(G.modularity(membership)), 6)
+    num_communities = len(set(membership))
+
+    entity_community = {str(e): int(membership[ent_idx[e]]) for e in entities}
+
+    # Build per-community stats
+    comm_df = pd.DataFrame({"entity": entities, "community": membership})
+    if value_col:
+        val_map = (
+            df.groupby(entity_col)[value_col].mean().to_dict()
+        )
+        comm_df["value"] = comm_df["entity"].map(val_map)
+        comm_stats_raw = (
+            comm_df.groupby("community")["value"]
+            .agg(["count", "mean", "std"])
+            .reset_index()
+        )
+        community_stats = [
+            {
+                "community_id": int(row["community"]),
+                "size": int(row["count"]),
+                "mean_value": round(float(row["mean"]), 6),
+                "std_value": round(float(row["std"]) if not np.isnan(row["std"]) else 0.0, 6),
+            }
+            for _, row in comm_stats_raw.iterrows()
+        ]
+        # Peer z-score outliers
+        comm_means = comm_df.groupby("community")["value"].transform("mean")
+        comm_stds = comm_df.groupby("community")["value"].transform("std").clip(lower=1e-9)
+        comm_df["peer_z"] = (comm_df["value"] - comm_means) / comm_stds
+        outliers_df = comm_df[comm_df["peer_z"] > z_threshold].sort_values("peer_z", ascending=False)
+        outliers = [
+            {
+                "entity": str(row["entity"]),
+                "community_id": int(row["community"]),
+                "value": round(float(row["value"]), 6),
+                "peer_z": round(float(row["peer_z"]), 4),
+            }
+            for _, row in outliers_df.iterrows()
+        ]
+    else:
+        comm_sizes = comm_df.groupby("community").size().to_dict()
+        community_stats = [
+            {"community_id": int(c), "size": int(s)}
+            for c, s in sorted(comm_sizes.items())
+        ]
+        outliers = []
+
+    return {
+        "entity_col": entity_col,
+        "code_col": code_col,
+        "n_entities": N,
+        "n_codes": len(codes),
+        "n_edges": len(edge_list),
+        "k": k_actual,
+        "min_sim": min_sim,
+        "num_communities": num_communities,
+        "modularity": modularity,
+        "community_stats": community_stats,
+        "entity_community": entity_community,
+        "outliers": outliers,
+        "z_threshold": z_threshold,
+        "summary": (
+            f"Cosine kNN graph: {N} entities, {len(edge_list)} edges, "
+            f"{num_communities} Louvain communities (modularity={modularity:.4f}). "
+            + (f"{len(outliers)} outliers above z>{z_threshold}." if outliers else "")
+        ),
+    }

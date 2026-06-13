@@ -13,7 +13,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from databench_mcp import __version__
-from databench_mcp.tools.analysis import analyze_correlations, analyze_distribution, detect_outliers
+from databench_mcp.tools.analysis import analyze_correlations, analyze_distribution, detect_outliers, peer_outliers
 from databench_mcp.tools.dashboard import build_dashboard
 from databench_mcp.tools.eda import (
     add_lag,
@@ -27,7 +27,7 @@ from databench_mcp.tools.eda import (
 )
 from databench_mcp.tools.hypothesis import hypothesis_add, hypothesis_list, hypothesis_update
 from databench_mcp.tools.ingest import ingest_file, ingest_url
-from databench_mcp.tools.modeling import list_findings, run_model
+from databench_mcp.tools.modeling import list_findings, run_model, similarity_network
 from databench_mcp.tools.profile import profile_table
 from databench_mcp.tools.project import project_create, project_list, project_status
 from databench_mcp.tools.recipes import reconstruct_recipe, run_recipe
@@ -36,7 +36,7 @@ from databench_mcp.tools.viz import create_chart, create_subplot
 mcp = FastMCP("databench")
 
 # Bump this in the same commit that adds or removes a tool.
-EXPECTED_TOOL_COUNT = 28
+EXPECTED_TOOL_COUNT = 30
 
 
 async def ping() -> dict[str, Any]:
@@ -67,6 +67,8 @@ mcp.tool(analyze_distribution)
 mcp.tool(analyze_correlations)
 mcp.tool(run_model)
 mcp.tool(list_findings)
+mcp.tool(similarity_network)
+mcp.tool(peer_outliers)
 mcp.tool(create_chart)
 mcp.tool(create_subplot)
 mcp.tool(reconstruct_recipe)
