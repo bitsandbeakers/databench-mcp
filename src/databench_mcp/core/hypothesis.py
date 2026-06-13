@@ -9,7 +9,7 @@ import yaml
 
 from databench_mcp.workspace import project_path, read_manifest
 
-_VALID_STATUSES = ("proposed", "prioritized", "tested", "supported", "refuted")
+_VALID_STATUSES = ("proposed", "prioritized", "tested", "supported", "refuted", "inconclusive")
 
 
 def _hypotheses_path(project: str):
@@ -97,6 +97,47 @@ def update_hypothesis(
                 notes = h.get("notes") or []
                 notes.append({"text": note, "added_at": datetime.now(timezone.utc).isoformat()})
                 h["notes"] = notes
+            _write_hypotheses(project, hypotheses)
+            return h
+    raise ValueError(f"Hypothesis '{hypothesis_id}' not found in project '{project}'")
+
+
+def record_evidence(
+    project: str,
+    hypothesis_id: str,
+    tool_name: str,
+    result_summary: str,
+    status_update: str | None = None,
+) -> dict[str, Any]:
+    """Append a structured evidence note to a hypothesis, optionally updating status.
+
+    Designed to be called immediately after a tool call (run_model, eda_summary,
+    sql_query, etc.) to keep the hypothesis tracker current without manual tracking.
+
+    Parameters
+    ----------
+    hypothesis_id  : e.g. 'h005'
+    tool_name      : name of the tool that produced the evidence (e.g. 'run_model')
+    result_summary : 1-3 sentence summary of what the tool result showed
+    status_update  : optional new status (supported / refuted / inconclusive / tested)
+    """
+    read_manifest(project)
+    if status_update is not None and status_update not in _VALID_STATUSES:
+        raise ValueError(f"Invalid status {status_update!r}; must be one of {_VALID_STATUSES}")
+    hypotheses = _read_hypotheses(project)
+    for h in hypotheses:
+        if h.get("id") == hypothesis_id:
+            notes = h.get("notes") or []
+            note_entry = {
+                "tool": tool_name,
+                "summary": result_summary,
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+            }
+            notes.append(note_entry)
+            h["notes"] = notes
+            if status_update is not None:
+                h["status"] = status_update
+                h["updated_at"] = datetime.now(timezone.utc).isoformat()
             _write_hypotheses(project, hypotheses)
             return h
     raise ValueError(f"Hypothesis '{hypothesis_id}' not found in project '{project}'")

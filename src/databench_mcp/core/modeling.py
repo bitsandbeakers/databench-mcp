@@ -112,16 +112,40 @@ def _run_lasso(
     df: pd.DataFrame, target: str, features: list[str], params: dict
 ) -> dict[str, Any]:
     _min_rows_check(df)
-    X, y, feat_names = _prepare_xy(df, features, target)
-    X_tr, X_te, y_tr, y_te = _split(X, y)
+
+    # OHE categorical features, then aggregate importances back to source feature
+    categorical_features: list[str] = params.get("categorical_features") or []
+    for cf in categorical_features:
+        if cf not in features:
+            raise ValueError(f"categorical_feature '{cf}' not in features list")
+
+    X_raw = df[features]
+    X_enc = pd.get_dummies(X_raw, columns=categorical_features, drop_first=True).astype(float)
+    feat_names = list(X_enc.columns)
+    y = df[target].astype(float)
+
+    X_tr, X_te, y_tr, y_te = _split(X_enc.values, y.values)
     alpha = float(params.get("alpha", 1.0))
     model = Lasso(alpha=alpha, max_iter=5000)
     model.fit(X_tr, y_tr)
     y_pred = model.predict(X_te)
+
+    # Aggregate absolute coefficients for OHE dummy groups back to source feature
+    raw_coefs: dict[str, float] = {n: float(c) for n, c in zip(feat_names, model.coef_)}
+    aggregated_importance: dict[str, float] = {}
+    for src in features:
+        if src in categorical_features:
+            dummy_cols = [n for n in feat_names if n.startswith(f"{src}_")]
+            agg = sum(abs(raw_coefs.get(c, 0.0)) for c in dummy_cols)
+            aggregated_importance[src] = round(agg, 6)
+        else:
+            aggregated_importance[src] = round(abs(raw_coefs.get(src, 0.0)), 6)
+
     metrics = {
         **_reg_metrics(y_te, y_pred),
         "alpha": alpha,
-        "coefficients": {n: round(float(c), 6) for n, c in zip(feat_names, model.coef_)},
+        "feature_importance": aggregated_importance,
+        "coefficients": {n: round(c, 6) for n, c in raw_coefs.items()},
         "nonzero_features": int(np.count_nonzero(model.coef_)),
     }
     return {
@@ -321,29 +345,56 @@ def _run_gradient_boosting(
 def _run_shap(
     df: pd.DataFrame, target: str, features: list[str], params: dict
 ) -> dict[str, Any]:
-    """Fit internal GBM, compute SHAP values. Caller saves shap_values to .npy."""
+    """Fit internal GBM, compute SHAP values. Caller saves shap_values to .npy.
+
+    params:
+      base_model        : 'gradient_boosting' (default) or 'random_forest'
+      shap_mode         : 'tree_path_dependent' (default) or 'interventional'
+      shap_background_n : background sample size for interventional mode (default 100)
+    """
     import shap as _shap
 
     _min_rows_check(df)
     X, y, feat_names = _prepare_xy(df, features, target)
     base_model_name = params.get("base_model", "gradient_boosting")
+    shap_mode = params.get("shap_mode", "tree_path_dependent")
+    if shap_mode not in ("tree_path_dependent", "interventional"):
+        raise ValueError(
+            f"Unknown shap_mode '{shap_mode}'. Choose: tree_path_dependent, interventional"
+        )
+
     if base_model_name == "random_forest":
         model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=-1)
     else:
         model = GradientBoostingRegressor(n_estimators=50, random_state=42)
     model.fit(X, y)
-    explainer = _shap.TreeExplainer(model)
+
+    if shap_mode == "interventional":
+        bg_n = int(params.get("shap_background_n", min(100, len(X))))
+        rng = np.random.default_rng(42)
+        bg_idx = rng.choice(len(X), size=min(bg_n, len(X)), replace=False)
+        background = X[bg_idx]
+        explainer = _shap.TreeExplainer(
+            model, data=background, feature_perturbation="interventional"
+        )
+    else:
+        explainer = _shap.TreeExplainer(model)
+
     shap_vals = explainer.shap_values(X)
     mean_abs = {n: round(float(v), 6) for n, v in zip(feat_names, np.abs(shap_vals).mean(axis=0))}
     metrics = {
         "mean_abs_shap": mean_abs,
         "base_model": base_model_name,
+        "shap_mode": shap_mode,
         "n_samples": len(X),
     }
+    top = max(mean_abs, key=mean_abs.get)
     return {
         "metrics": metrics,
         "explainability": "medium",
-        "summary": f"SHAP via {base_model_name} — top driver: {max(mean_abs, key=mean_abs.get)}.",
+        "summary": (
+            f"SHAP ({shap_mode}) via {base_model_name} — top driver: {top}."
+        ),
         "shap_values": shap_vals,
     }
 
