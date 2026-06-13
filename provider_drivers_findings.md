@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-1. **For-profit hospitals charge ~33% more for comparable work.** Net of case mix, geography, and hospital archetype, nonprofit hospitals charge **−33%** and government hospitals **−34%** vs for-profit. Large, clean, and stable. *(Associational — see causal note.)*
+1. **For-profit hospitals charge ~33–46% more for comparable work — and it's pricing behavior, not cost.** Net of case mix, geography, and archetype, nonprofit charge **−33%** / government **−34%** vs for-profit (3-level), or **+46%** for-profit vs the rest (binary, robust from a +62.5% raw premium). The premium shows up on submitted **charges (+45%)** but **not on Medicare payment (−9%)** — a charging/markup posture, not higher underlying cost. *(Associational — see causal note.)*
 2. **The dominant cost drivers, in order: geography (state) → case-mix → ownership.** This trio is identical across three independent importance methods, and the ranking is perfectly stable across 5 random seeds.
 3. **Rural hospitals are the most exposed to Medicare cuts (h011, supported):** ~2× the Medicare dependence of urban hospitals *and* already-negative operating margins — no cushion to absorb a reimbursement reduction.
 
@@ -116,6 +116,15 @@ It barely erodes — geography and case mix explain only a small part. ~46% is a
 **Chain effect:** HCA-branded for-profits sit **+113%** above case-mix expectation vs +30% for other for-profits (n=60; name-detection undercounts HCA, so understated). Top for-profit over-chargers (full-model residual) match h008/h013: Carepoint (NJ ×2), Regional Med Ctr San Jose (CA, HCA), Merit Health (MS ×4, CHS), Gadsden/Brookwood (AL), Desert Springs (NV).
 
 This corroborates h008 (for-profit chains cluster as outliers) and h013 (steerage targets) with quantified effect sizes. *Note:* clean chain attribution needs the CMS ownership/chain enrollment file — name-detection is a lower bound.
+
+**Falsification — charging behavior, not cost** (`prov_ownership_payment_check.py`). Same model, two targets, full controls:
+
+| Target | For-profit premium |
+|--------|:---:|
+| Submitted charge | **+45.4%** |
+| Medicare payment | **−8.9%** |
+
+For-profits bill ~45% more but Medicare *pays them slightly less* for comparable work. Because Medicare payment is formula-set (not charge-driven), the premium is a **pricing/markup posture, not higher cost of care** — it only bites a charge-based commercial payer. Mirrors h004's mechanism (NV charges 2.1× but Medicare pays 1.08×).
 
 ## Causal analysis — recommended next step (not run)
 
