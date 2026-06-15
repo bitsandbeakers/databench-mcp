@@ -2,6 +2,8 @@
 
 AI-augmented data-analysis MCP platform — guard-railed tools for ingestion, profiling, EDA, pipeline transforms, hypothesis tracking, statistical analysis, modeling, visualization, and reproducible recipe pipelines. Medicare public data as the proving ground.
 
+> **📋 Interview submission?** Start with **[SUBMISSION.md](SUBMISSION.md)** — it maps where everything is (dashboard, slides, analysis, the MCP server, the skill) and links the **[live interactive dashboard](https://bitsandbeakers.github.io/databench-mcp/uhc-affordability/)**.
+
 ## Setup
 
 ```bash
