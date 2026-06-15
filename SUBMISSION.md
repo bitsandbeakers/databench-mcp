@@ -19,7 +19,7 @@ hypothesis → evidence process.
 | What | Where |
 |------|-------|
 | **Interactive dashboard** (story + methods + appendix) | live URL above · source `workspace/uhc_affordability/dashboards/app.py` · static export `docs/uhc-affordability/index.html` |
-| **Slides** (presenting + read-ahead) | `docs/slides/` |
+| **Slides** (read-ahead in repo; presenting deck shared separately) | `docs/slides/` |
 | **MCP server** — the analysis platform I built | `src/databench_mcp/` (+ `tests/`, 37 files) |
 | **The analyst skill** — the process it enforced | `docs/databench-analyst-SKILL.md` |
 | **Insight + outlier + driver analysis scripts** | `prov_drivers_triangulate.py`, `prov_ownership_explore.py`, `prov_ownership_payment_check.py`, `prov_drivers_model.py`, `prov_leakage_estimate.py`, `uhc_analysis.py`, `metrics_compare.py` |
@@ -55,7 +55,7 @@ pip install -r workspace/uhc_affordability/dashboards/requirements.txt
 python workspace/uhc_affordability/dashboards/app.py        # http://127.0.0.1:8050
 
 # Regenerate the slides
-python workspace/uhc_affordability/dashboards/generate_slides.py            # with notes
+python workspace/uhc_affordability/dashboards/generate_slides.py            # with notes (local only)
 python workspace/uhc_affordability/dashboards/generate_slides.py --no-notes # read-ahead
 
 # The MCP server itself
