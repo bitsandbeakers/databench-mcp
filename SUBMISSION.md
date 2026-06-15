@@ -11,8 +11,8 @@ hypothesis → evidence process.
   https://bitsandbeakers.github.io/databench-mcp/uhc-affordability/
   *(fully self-contained — charts are interactive; the network's archetype focus + avoidance
   toggle work in the browser)*
-- **Slides:** [`docs/slides/`](docs/slides/) — `UHC_Affordability_Deck.pptx` (with speaker
-  notes, for presenting) and `..._readahead.pptx` (no notes, for reading ahead)
+- **Slides:** [`docs/slides/`](docs/slides/) — `UHC_Affordability_Deck_readahead.pptx`
+  (no speaker notes). The full presenting version (with notes) is provided directly, not committed.
 
 ## Where everything is
 
