@@ -124,6 +124,22 @@ def step_strip(slide, steps, top=6.0, height=0.72, left=0.7, total=11.95, gap=0.
         x += bw + gap
 
 
+def table(slide, headers, rows, left, top, width, height, fs=10.5):
+    g = slide.shapes.add_table(len(rows) + 1, len(headers),
+                               Inches(left), Inches(top), Inches(width), Inches(height)).table
+    for j, h in enumerate(headers):
+        c = g.cell(0, j); c.text = str(h); c.fill.solid(); c.fill.fore_color.rgb = INK
+        for r in c.text_frame.paragraphs[0].runs:
+            r.font.size = Pt(fs); r.font.bold = True; r.font.name = FONT; r.font.color.rgb = WWHITE
+    for i, row in enumerate(rows, 1):
+        for j, v in enumerate(row):
+            c = g.cell(i, j); c.text = str(v)
+            c.fill.solid(); c.fill.fore_color.rgb = (WWHITE if i % 2 else HORIZON)
+            for r in c.text_frame.paragraphs[0].runs:
+                r.font.size = Pt(fs); r.font.name = FONT; r.font.color.rgb = INK
+    return g
+
+
 def notes(slide, text):
     if NO_NOTES:
         return
@@ -233,7 +249,7 @@ evidence("Comparing fairly", "I group hospitals by the kind of care they actuall
         "The groups came out of the data automatically — not hand-picked.",
         [("Why it matters: ", True), ("I compare each hospital only to its true peers, so 'our patients are just "
          "sicker' doesn't hold up.", False)],
-        "In the live dashboard you can pick a hospital type and see the flagged ones.",
+        [("▶ Live demo — switch to the dashboard: ", True), ("pick a hospital type; toggle the ✕ avoidances on/off.", False)],
     ],
     "The network-analytics centerpiece (role fit) — linger and demo the live dropdowns. Method: cosine similarity of "
     "each hospital's service-mix vector → k-nearest-neighbour graph → Louvain community detection, 14 communities at "
@@ -383,6 +399,114 @@ notes(s, "Voice track (bullets are headlines only): (1) Cost-only steering can s
          "cheaper, higher-quality neighbor within ~40 miles — the fast wins. (3) For the markets with no nearby "
          "alternative (the 2 'no local option' cases), steering can't help — negotiate rates or redesign the network "
          "there. Close on action, not findings; point them to the live dashboard as the interactive leave-behind.")
+
+# ================================================================ APPENDIX (technical backup)
+s = new("Appendix")
+tb = s.shapes.add_textbox(Inches(0.8), Inches(2.9), Inches(11.5), Inches(1.3))
+_txt(tb.text_frame, "Appendix — methods & detail", 34, bold=True, color=INK)
+band = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.8), Inches(4.15), Inches(3.0), Inches(0.1))
+band.fill.solid(); band.fill.fore_color.rgb = ORANGE; band.line.fill.background()
+sb = s.shapes.add_textbox(Inches(0.8), Inches(4.4), Inches(11.5), Inches(0.6))
+_txt(sb.text_frame, "Technical backup — the same detail is also in the live dashboard's methods appendix.", 14, color=INK)
+notes(s, "Backup slides for technical Q&A; the dashboard appendix holds the full version.")
+
+# A1 — data & preparation
+s = new("Appendix · data & preparation"); title(s, "Datasets, cleaning, integration")
+bullets(s, [
+    [("Core: ", True), ("CMS Medicare Inpatient 146,427 provider×DRG + Outpatient 116,799 provider×APC; joined on CCN.", False)],
+    [("Combined four ways: ", True), ("(1) separately at natural grain (within-DRG / within-APC outlier detection); "
+     "(2) stacked long, ~210k rows (pooled cost-index, markup); (3) merged per-hospital, both settings (pricing-culture "
+     "ρ=0.82, driver model); (4) a DRG+APC service-mix matrix (archetype network).", False)],
+    [("Cleaning: ", True), ("Latin-1→UTF-8 re-encode, DECIMAL coercion, CCN zero-pad, RUCA=99 excluded, CMS "
+     "cell-suppression noted, HCRIS total-margin artifact corrected.", False)],
+    [("Supplements (all CMS): ", True), ("HCRIS cost report (ownership, margins), RUCA (urbanicity), public ZIP "
+     "centroids (distance), Hospital Compare (quality stars).", False)],
+    [("Distribution: ", True), ("submitted charge skew 12.5, kurtosis 535 → medians, logs and rank statistics "
+     "throughout; never means/SD on raw dollars.", False)],
+], left=0.6, top=1.85, width=12.2, size=13)
+notes(s, "Task 1 detail.")
+
+# A2 — outlier detection
+s = new("Appendix · outlier detection"); title(s, "Peer-relative, archetype-adjusted — in both settings")
+bullets(s, [
+    [("Service-grain: ", True), ("flag providers in the top 5% of submitted charge within each DRG (inpatient) and "
+     "APC (outpatient); rank by number of services flagged.", False)],
+    [("Defensible list: ", True), ("normalize each charge to the national median for that service, then a within-"
+     "archetype robust modified-z (median + MAD) ≥ 3.5.", False)],
+    [("Why archetype-adjusted: ", True), ("raw within-service detection over-flags academic centers (genuine "
+     "case-mix); archetype-relative drops Cedars-Sinai, keeps Stanford + the for-profit chains.", False)],
+    [("Repeat-offenders: ", True), ("high-confidence outliers price ~95% of their service lines above the national "
+     "90th percentile — a hospital-wide posture.", False)],
+], left=0.6, top=1.85, width=6.1, size=13)
+table(s, ["Cut", "Flagged"], [["within-archetype p95", "153"], ["robust z ≥ 3.5 (high-conf)", "11"],
+      ["plain-z ≥ 2 (foil)", "83"], ["chain: Capital Health / Carepoint", "100%"], ["chain: HCA", "24%"],
+      ["independents", "4.5%"]], left=7.0, top=2.0, width=5.9, height=2.4)
+notes(s, "Task 3 detail — both IP and OP, plus the clustering patterns.")
+
+# A3 — service-mix network
+s = new("Appendix · service-mix network"); title(s, "Archetypes from how hospitals actually deliver care")
+bullets(s, [
+    [("Construction: ", True), ("each hospital = its DRG/APC service-mix vector (3,236 hospitals × 602 codes); cosine "
+     "similarity → k-nearest-neighbour graph (k=10).", False)],
+    [("Communities: ", True), ("Louvain detection → 14 communities at modularity 0.704 (strong separation); "
+     "signature-service lift names them — academic/tertiary, generalist, surgical-specialty, rural, behavioral, rehab.", False)],
+    [("Cross-checks: ", True), ("PCA (variance spread across many components) and k-means independently recover the "
+     "coarse generalist-core / specialty-periphery structure — not a Louvain artifact.", False)],
+    [("Use: ", True), ("archetype membership defines the peer set for the outlier and steerage analysis.", False)],
+], left=0.6, top=1.85, width=12.2, size=13)
+notes(s, "The network methodology in detail.")
+
+# A4 — cost-driver model
+s = new("Appendix · cost-driver model"); title(s, "Leakage-free, triangulated, decision-relevant metrics")
+bullets(s, [
+    [("Design: ", True), ("provider grain (n=2,933); a discharge-weighted case-mix index preserves the DRG signal "
+     "without service-grain leakage.", False)],
+    [("Importance: ", True), ("interventional SHAP + permutation + glass-box EBM agree and are seed-stable across 5 "
+     "seeds: state > case-mix > ownership; volume negligible.", False)],
+    [("Metrics: ", True), ("5-fold CV, reported as MAE + back-transformed dollar error — not R² alone (R² on a log "
+     "target flatters fit).", False)],
+], left=0.6, top=1.75, width=12.2, size=13)
+table(s, ["Model (5-fold CV)", "R²(log)", "MAE(log)", "$ median err", "$ MdAPE"], [
+    ["EBM (glass-box)", "0.704 ± .015", "0.270", "$11,090", "22%"],
+    ["LightGBM", "0.678 ± .029", "0.281", "$11,503", "22%"],
+    ["Lasso", "0.584 ± .014", "0.324", "$13,592", "27%"],
+], left=0.6, top=3.5, width=8.6, height=1.5)
+tnote = s.shapes.add_textbox(Inches(0.6), Inches(5.4), Inches(12.2), Inches(1.2))
+_txt(tnote.text_frame, [("Variance decomposition (η²): ", True), ("log charge — DRG 0.578, state 0.180, urbanicity "
+     "0.040; log Medicare payment — DRG 0.869, state 0.054. Geography loads ~3× more on charges than on cost-based "
+     "payment — the pricing-discretion signal.", False)], 12, color=INK)
+notes(s, "Bonus question detail; metric-choice rationale (corr. c008).")
+
+# A5 — falsification & quality
+s = new("Appendix · falsification & quality"); title(s, "Pricing-not-cost, and cost vs quality uncorrelated")
+bullets(s, [
+    [("For-profit premium (nested OLS on log charge): ", True), ("+62.5% raw → +46.3% under full controls (case-mix, "
+     "archetype, urbanicity, state); nonprofit −33%, government −34% vs for-profit.", False)],
+    [("Falsification: ", True), ("under identical controls, +45% on submitted charge but −9% on wage-index-adjusted "
+     "Medicare payment → markup, not cost. Pricing culture transfers IP↔OP (Spearman 0.82).", False)],
+    [("Cost × quality (CMS Hospital Compare, n=2,616 rated): ", True), ("Spearman(cost, star) = −0.03; mean star by "
+     "cost band 3.15 / 3.26 / 3.22 / 2.74 — the very-pricey tier is only 25% 4–5★.", False)],
+    [("The 11 avoidances: ", True), ("7 of 10 rated are 1–2★ (steer-away doubly justified); Stanford 5★ and MLK 4★ are "
+     "the quality-gate exceptions.", False)],
+], left=0.6, top=1.85, width=12.2, size=13)
+notes(s, "The falsification logic + the cost×quality result, with numbers.")
+
+# A6 — robustness & limitations
+s = new("Appendix · robustness & limitations"); title(s, "Holds out-of-year (2022); honest limits")
+table(s, ["Finding", "2022", "2023"], [
+    ["Inpatient charge skew", "11.4", "12.5"],
+    ["Within-DRG dispersion (p90/p10)", "3.63×", "3.67×"],
+    ["Median markup — IP / OP", "5.37× / 7.38×", "5.52× / 7.62×"],
+    ["Non-metro vs metro (case-mix adj.)", "−27.6%", "−26.6%"],
+    ["IP↔OP pricing-culture (Spearman)", "0.83", "0.82"],
+    ["For-profit charge premium (median)", "+43%", "+49%"],
+], left=0.6, top=1.8, width=8.0, height=2.5)
+bullets(s, [
+    [("Limits: ", True), ("submitted charges, not negotiated commercial rates; Medicare data (commercial-to-Medicare "
+     "ratios vary); 2013 ZIP vintage (93.6% geocoded); chain detection undercounts HCA (the effect is a lower bound); "
+     "all effects associational (causal design framed, not run).", False)],
+], left=0.6, top=4.7, width=12.2, size=12)
+notes(s, "2022 holdout + the limitations, stated plainly.")
 
 prs.save(str(OUT))
 print(f"\nwrote {OUT.name} — {len(prs.slides._sldIdLst)} slides")

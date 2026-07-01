@@ -1204,6 +1204,30 @@ app.layout = html.Div([
         ]),
 
         html.Details(className="app-block", children=[
+            html.Summary("What the databench-mcp tools do"),
+            html.Div(className="app-body", children=[
+                html.P("The analysis was driven entirely through these MCP tools — each tool chip in the section "
+                       "methods above maps to one of these. Every tool carries built-in discipline "
+                       "(profile-before-model, natural-grain, leakage-aware)."),
+                mtable(["Tool", "What it does"], [
+                    ["ingest_url / ingest_file", "Download or load a dataset into the project DB (raw saved + registered)."],
+                    ["profile_table", "Types, null rates, cardinality, ranges — gates analysis (profile-before-model)."],
+                    ["eda_summary", "One call: distributions + correlations + outlier overview for a table."],
+                    ["analyze_distribution", "Distribution shape — skew, kurtosis, normality test, percentiles."],
+                    ["analyze_correlations", "Correlation matrix + top pairs (Pearson or Spearman rank)."],
+                    ["group_summary", "Group-wise statistics across a categorical variable."],
+                    ["detect_outliers / peer_outliers", "Single-variable z-score outliers / entity-vs-peer (within-group) outliers."],
+                    ["sql_query", "Read-only SQL against the project DuckDB (ad-hoc questions, joins)."],
+                    ["run_model", "Fit Lasso / EBM / LightGBM / k-means / PCA with leakage-aware cross-validation."],
+                    ["similarity_network", "Build a cosine-similarity k-NN graph and detect communities (Louvain)."],
+                    ["hypothesis_add / record_evidence / update", "The hypothesis tracker — propose, attach evidence, set status."],
+                    ["log_correction", "The human-in-the-loop correction ledger (categorized)."],
+                    ["create_chart / build_dashboard", "Charts and an assembled dashboard from the analysis."],
+                ]),
+            ]),
+        ]),
+
+        html.Details(className="app-block", children=[
             html.Summary("Method — why peer-relative, archetype-adjusted comparison"),
             html.Div(className="app-body", children=[
                 html.P("Raw dollar means are meaningless on a skew-12.5 distribution, and a national-mean outlier "
